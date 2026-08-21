@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>{% block title %}Cyberseek{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='overrides.css') }}">
+</head>
+<body class="{% if current_user() %}signed-in{% else %}guest{% endif %}">
+{% if current_user() %}
+  <button class="theme-toggle global-theme-toggle" type="button" aria-label="Toggle color theme">[ LIGHT ]</button>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-top"><a class="brand" href="{{ url_for('surface_monitoring') }}">CYBERSEEK</a></div>
+      <br>
+      <nav class="side-menu">
+        {% if current_user()['is_admin'] %}
+          <section class="menu-group"><p>ADMINISTRATIVE</p><a href="{{ url_for('manage_users') }}">Users</a><a href="{{ url_for('source_apis') }}">Source APIs</a></section>
+        {% endif %}
+        <section class="menu-group"><p>MONITORING</p><a href="{{ url_for('surface_monitoring') }}">Surface</a><a href="{{ url_for('email_exposure') }}">Email exposure</a></section>
+        <section class="menu-group"><p>RECONNAISSANCE</p><a href="{{ url_for('dns_queries') }}">DNS query</a><a href="{{ url_for('whois_lookup') }}">WHOIS lookup</a><a href="{{ url_for('blacklist_check') }}">Blacklist check</a><a href="{{ url_for('spf_check') }}">SPF check</a></section>
+        <section class="menu-group"><p>ANALYSIS</p><a href="{{ url_for('file_scan') }}">File scan</a><a href="{{ url_for('reputation_lookup') }}">Reputation lookup</a><a href="{{ url_for('live_url_analysis') }}">Live URL analysis</a><a href="{{ url_for('eml_analysis') }}">EML scan</a></section>
+      </nav>
+      <div class="side-bottom"><span>{{ current_user()['name'] }}</span><div class="account-actions"><a class="account-password-link" href="{{ url_for('change_password') }}">Passwd</a><a class="account-password-link" href="{{ url_for('two_factor_settings') }}">2FA</a><form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button>Singout</button></form></div></div>
+    </aside>
+    <main class="content">
+{% else %}
+  <main class="auth-shell">
+{% endif %}
+{% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+{% block content %}{% endblock %}
+</main>
+{% if current_user() %}</div>{% endif %}
+<script>const b=document.body,t=document.querySelector('.theme-toggle'),csrf=document.querySelector('meta[name="csrf-token"]')?.content;const apply=x=>{b.dataset.theme=x;if(t)t.textContent=x==='dark'?'[ LIGHT ]':'[ DARK ]'};apply(localStorage.getItem('cyberseek-theme')||'dark');t&&t.addEventListener('click',()=>{const x=b.dataset.theme==='dark'?'light':'dark';localStorage.setItem('cyberseek-theme',x);apply(x)});csrf&&document.querySelectorAll('form').forEach(form=>{if(form.method.toLowerCase()!=='post'||form.querySelector('input[name="csrf_token"]'))return;const input=document.createElement('input');input.type='hidden';input.name='csrf_token';input.value=csrf;form.prepend(input)})</script>
+</body>
+</html>

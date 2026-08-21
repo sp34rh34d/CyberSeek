@@ -1,0 +1,164 @@
+{% extends 'base.html' %}
+{% block title %}File sandbox report · Cyberseek{% endblock %}
+{% block content %}
+<section class="task-view file-scan-report">
+  <div class="task-topbar"><a class="back-link" href="{{ url_for('file_scan') }}"> Back to file scans</a>{% if report %}<details class="task-export"><summary>Export</summary><a href="{{ url_for('export_file_scan_task', task_id=task['id'], export_format='json') }}">JSON</a><a href="{{ url_for('export_file_scan_task', task_id=task['id'], export_format='html') }}">HTML</a></details>{% endif %}</div>
+  <div class="task-meta"><span>{{ task['filename'] }}</span><span class="task-status {{ task['status']|lower }}" data-task-status="{{ task['status'] }}">{{ task['status'] }}</span></div>
+  {% if task['status'] == 'Running' and not report %}<p>This analysis is starting. This page refreshes automatically every 5 seconds.</p>
+  {% elif task['error'] %}<pre class="dns-output error-output">{{ task['error'] }}</pre>
+  {% elif report %}
+    <p class="static-sandbox-notice">{{ report['notice'] }}</p>
+    {% set local = report.get('local_heuristic', {}) %}
+    {% if local %}<section class="formal-output local-heuristic-output"><div class="output-heading"><div><p class="eyebrow">LOCAL HEURISTICS</p><h2>Historical correlation</h2></div><span class="url-verdict {{ local.get('verdict', 'unknown')|lower }}">{{ local.get('verdict', 'Unknown') }}</span></div><p>{{ local.get('tracked_indicators', 0) }} indicators · {{ local.get('observations', 0) }} local observations · {{ local.get('confidence', 'Low') }} confidence</p></section>{% endif %}
+    {% set vt = report.get('hash_reputation', {'verdict':'Unknown', 'state':'Unavailable', 'detail':'This historical report has no VirusTotal hash result.', 'malicious':0, 'suspicious':0, 'clean':0}) %}{% set local_static = report.get('static_reputation', {}) %}
+    <div class="report-tabs" role="tablist" aria-label="File analysis views"><button type="button" class="report-tab active" role="tab" aria-selected="true" aria-controls="static-analysis" data-report-tab="static-analysis">Static analysis</button><button type="button" class="report-tab" role="tab" aria-selected="false" aria-controls="dynamic-analysis" data-report-tab="dynamic-analysis">Dynamic analysis{% if report.get('analysis_mode') != 'dynamic' %} · not requested{% endif %}</button><button type="button" class="report-tab" role="tab" aria-selected="false" aria-controls="threat-indicators" data-report-tab="threat-indicators">Threat indicators{% if report.get('analysis_mode') != 'dynamic' %} · not requested{% endif %}</button><button type="button" class="report-tab" role="tab" aria-selected="false" aria-controls="ioc-indicators" data-report-tab="ioc-indicators">Indicators of compromise</button></div>
+    <section id="static-analysis" class="report-tab-panel" role="tabpanel">{% if local_static %}<section class="formal-output local-static-verdict"><div class="output-heading"><div><p class="eyebrow">LOCAL STATIC VERDICT</p><h2>Content assessment</h2></div><span class="url-verdict {{ local_static.get('verdict', 'unknown')|lower }}">{{ local_static.get('verdict', 'Unknown') }}</span></div><p>{{ local_static.get('detail', 'No local static verdict is available.') }}</p></section>{% endif %}
+    <section class="formal-output static-analysis-group"><div class="output-heading"><div><p class="eyebrow">STATIC ANALYSIS</p><h2>{{ report['filename'] }}</h2></div><span>{{ report['inspected_bytes'] }} bytes inspected</span></div><div class="file-overview"><div><small>Format</small><strong>{{ report['format'] }}</strong></div><div><small>Size</small><strong>{{ report['size'] }} bytes</strong></div><div><small>Risk</small><strong>{{ report['risk'] }}</strong></div><div><small>Strings</small><strong>{{ report.get('string_count', report.get('strings', [])|length) }}</strong></div></div><dl class="file-hashes"><div><dt>MD5</dt><dd><code>{{ report['hashes']['md5'] }}</code></dd></div><div><dt>SHA-1</dt><dd><code>{{ report['hashes']['sha1'] }}</code></dd></div><div><dt>SHA-256</dt><dd><code>{{ report['hashes']['sha256'] }}</code></dd></div></dl><section class="static-analysis-subsection vt-hash-reputation {{ vt['verdict']|lower }}"><div class="static-analysis-subheading"><div><p class="eyebrow">HASH REPUTATION</p><h3>VirusTotal</h3></div><span class="url-verdict {{ vt['verdict']|lower }}">{{ vt['verdict'] }}</span></div><p class="reputation-detail">{{ vt['detail'] }}</p><div class="file-detection-counts"><span>Malicious <strong>{{ vt['malicious'] }}</strong></span><span>Suspicious <strong>{{ vt['suspicious'] }}</strong></span><span>Clean <strong>{{ vt['clean'] }}</strong></span></div></section><section class="static-analysis-subsection static-strings-section"><div class="static-analysis-subheading"><div><p class="eyebrow">STATIC STRINGS</p><h3>Extracted printable data</h3></div><span>{{ report.get('string_count', report.get('strings', [])|length) }} strings{% if report.get('strings_truncated') %} · display capped at 300{% endif %}</span></div><div class="static-strings"><div class="string-heading"><span>Source</span><span>Offset</span><span>Encoding</span><span>Length</span><span>Value</span></div>{% for item in report.get('strings', []) %}{% if item is mapping %}<div class="string-row"><span title="{{ item.get('source', 'Uploaded file') }}">{{ item.get('source', 'Uploaded file') }}</span><span>{{ item['offset'] }}</span><span>{{ item['encoding'] }}</span><span>{{ item['length'] }}</span><code>{{ item['value'] }}{% if item.get('truncated') %} … [truncated at 16,000 characters]{% endif %}</code></div>{% else %}<div class="string-row legacy"><span>Uploaded file</span><span>—</span><span>ASCII</span><span>{{ item|length }}</span><code>{{ item }}</code></div>{% endif %}{% else %}<p class="empty">No printable strings were extracted.</p>{% endfor %}</div></section></section>
+    </section>
+    {% set dynamic = report.get('dynamic') %}
+    <section id="dynamic-analysis" class="report-tab-panel" role="tabpanel" hidden>{% if dynamic %}<section class="formal-output dynamic-analysis-output"><div class="output-heading"><div><p class="eyebrow">EXTERNAL DYNAMIC SANDBOX</p><h2>{{ dynamic['provider'] }}</h2></div><span class="task-status {{ dynamic['state']|lower }}">{{ dynamic['state'] }}</span></div><p class="reputation-detail">{{ dynamic['detail'] }}</p>{% if dynamic.get('submission_id') %}<div class="dynamic-submission"><code>Submission {{ dynamic['submission_id'] }}</code></div>{% endif %}{% if dynamic.get('fields') %}<dl class="dynamic-fields">{% for field in dynamic['fields'] %}<div><dt>{{ field['label'] }}</dt><dd class="{% if field.get('tone') %}dynamic-threat-tone {{ field['tone'] }}{% endif %}">{{ field['value'] }}</dd></div>{% endfor %}</dl>{% endif %}<section class="dynamic-process-output"><div class="static-analysis-subheading"><div><p class="eyebrow">DYNAMIC ACTIVITY FLOW</p><h3>Observed actions and MITRE classification</h3></div><span>{{ dynamic.get('actions', [])|length + dynamic.get('network_requests', [])|length }} observations</span></div><div id="dynamic-process-tree-current" class="process-tree-dynamic" data-provider="{{ dynamic['provider'] }}" data-actions='{{ dynamic.get("actions", [])|tojson|forceescape }}' data-network='{{ dynamic.get("network_requests", [])|tojson|forceescape }}'></div></section><section class="formal-output network-connections-output"><div class="output-heading"><div><p class="eyebrow">NETWORK CONNECTIONS</p><h2>Observed IP requests</h2></div><span>{{ dynamic.get('network_connections', [])|length }} IP addresses</span></div><p class="reputation-detail">Country and network ownership are shown for public IPs. VirusTotal reputation is included when its API key is configured.</p><div class="table-wrap"><table><thead><tr><th>IP address</th><th>Country</th><th>Owner / ISP</th><th>VirusTotal reputation</th><th>Engine results</th></tr></thead><tbody>{% for connection in dynamic.get('network_connections', []) %}<tr><td><code>{{ connection['ip'] }}</code></td><td>{{ connection['country'] }}</td><td><strong>{{ connection['owner'] }}</strong><small>{{ connection['isp'] }}</small></td><td title="{{ connection.get('detail', '') }}"><span class="url-verdict {{ connection['reputation']|lower }}">{{ connection['reputation'] }}</span></td><td>{{ connection['malicious'] }} malicious · {{ connection['suspicious'] }} suspicious · {{ connection['clean'] }} clean · {{ connection['unknown'] }} unknown</td></tr>{% else %}<tr><td colspan="5" class="empty">No IP address requests were returned by the sandbox.</td></tr>{% endfor %}</tbody></table></div></section>{% if dynamic['state'] == 'Queued' %}<p class="external-notice">The provider is processing the uploaded file. This page checks again every 5 seconds while it remains open.</p>{% endif %}</section>{% else %}<section class="formal-output dynamic-analysis-output"><div class="output-heading"><div><p class="eyebrow">DYNAMIC ANALYSIS</p><h2>Not requested</h2></div></div><p class="reputation-detail">This task contains local static analysis only. Start a new task in Dynamic analysis mode and select Hybrid Analysis or Filescan.io to submit the file to an external sandbox.</p></section>{% endif %}</section>
+    <section id="threat-indicators" class="report-tab-panel" role="tabpanel" hidden>
+      {% if dynamic %}
+        {% set indicators = dynamic.get('ai_threat_indicators', []) %}
+        <section class="formal-output threat-indicators-output">
+          <div class="output-heading"><div><p class="eyebrow">THREAT INDICATORS</p><h2>AI-assisted action triage</h2></div><span>{{ indicators|length }} actions</span></div>
+          {% set ai_summary = dynamic.get('ai_summary', {}) %}<section class="ai-sandbox-summary"><div class="output-heading"><div><p class="eyebrow">AI SANDBOX SUMMARY</p><h3>SOC analyst assessment</h3></div><span class="url-verdict {{ ai_summary.get('verdict', 'unknown')|lower }}">{{ ai_summary.get('verdict', 'Unknown') }}</span></div><p>{{ ai_summary.get('assessment', 'The SOC summary is being prepared from static and dynamic evidence.') }}</p><div class="ai-sandbox-evidence"><span class="ai-summary-confidence {{ ai_summary.get('confidence', 'low')|lower }}">Confidence: <strong>{{ ai_summary.get('confidence', 'Low') }}</strong></span>{% for item in ai_summary.get('evidence', []) %}<span>{{ item }}</span>{% endfor %}</div><div class="ai-sandbox-actions"><small>Recommended next actions</small><ul>{% for item in ai_summary.get('recommendations', []) %}<li>{{ item }}</li>{% else %}<li>Review the collected evidence before assigning a final disposition.</li>{% endfor %}</ul></div></section>
+          <div class="threat-indicator-list">
+            {% for indicator in indicators %}
+              <article class="threat-indicator-card {{ indicator['severity']|lower }}">
+                <header><div><p class="eyebrow">ACTION DETECTED</p><h3>{{ indicator['title'] }}</h3></div><span class="threat-indicator-verdict {{ indicator['severity']|lower }}">{{ indicator['verdict'] }}</span></header>
+                <dl class="threat-indicator-meta"><div><dt>Origin</dt><dd>{{ indicator['origin'] }} · {{ report['filename'] }}</dd></div><div><dt>Tags</dt><dd>{% for tag in indicator['tags'] %}<span class="threat-tag">{{ tag }}</span>{% endfor %}</dd></div><div><dt>Assessment</dt><dd>{{ indicator['source'] }}</dd></div></dl>
+                <div class="threat-command"><small>Command observed</small><code>{{ indicator['command'] }}</code></div>
+                <p class="threat-assessment">{{ indicator['summary'] }}</p>
+                <section class="threat-mitre"><p class="eyebrow">MITRE TECHNIQUES</p>{% for technique in indicator['techniques'] %}<article><dl><div><dt>Tactic</dt><dd>{{ technique['tactic'] }}</dd></div><div><dt>Technique</dt><dd><strong>{{ technique['id'] }} · {{ technique['name'] }}</strong></dd></div></dl><p>{{ technique['description'] }}</p></article>{% else %}<p class="empty">No MITRE technique was mapped to this action.</p>{% endfor %}</section>
+              </article>
+            {% else %}
+              <p class="empty">No executable action was returned by the dynamic sandbox.</p>
+            {% endfor %}
+          </div>
+        </section>
+      {% else %}
+        <section class="formal-output"><p>This task contains local static analysis only. Dynamic threat indicators are available after an external sandbox run.</p></section>
+      {% endif %}
+    </section>
+    <section id="ioc-indicators" class="report-tab-panel" role="tabpanel" hidden>
+      <section class="formal-output ioc-indicators-output"><div class="output-heading"><div><p class="eyebrow">INDICATORS OF COMPROMISE</p><h2>Extracted artifacts</h2></div><div class="ioc-export-control"><span>{{ ioc_indicators|length }} indicators</span><a class="text-button" href="{{ url_for('export_file_scan_iocs', task_id=task['id']) }}">Export IoC</a></div></div><p class="reputation-detail">Artifacts extracted from the uploaded file and, when available, the external sandbox report.</p><div class="table-wrap"><table><thead><tr><th>Type</th><th>Indicator</th><th>Source</th></tr></thead><tbody>{% for indicator in ioc_indicators %}<tr><td><span class="ioc-kind">{{ indicator['kind'] }}</span></td><td><code>{{ indicator['value'] }}</code></td><td>{{ indicator['source'] }}</td></tr>{% else %}<tr><td colspan="3" class="empty">No indicators were extracted from this task.</td></tr>{% endfor %}</tbody></table></div></section>
+    </section>
+  {% endif %}
+</section>
+<script>if(document.querySelector('[data-task-status="Running"]'))setTimeout(()=>location.reload(),5000);const tabs=document.querySelectorAll('[data-report-tab]');tabs.forEach(tab=>tab.addEventListener('click',()=>{tabs.forEach(item=>{const active=item===tab;item.classList.toggle('active',active);item.setAttribute('aria-selected',String(active));document.getElementById(item.dataset.reportTab).hidden=!active})}));const dynamicTree=document.querySelector('#dynamic-process-tree');if(dynamicTree){const actions=JSON.parse(dynamicTree.dataset.actions).slice(0,8),network=JSON.parse(dynamicTree.dataset.network).slice(0,8),riskFor=mitre=>mitre==='—'?'low':/T1055|T1547|T1105/.test(mitre)?'high':'medium',uniqueMitre=[...new Set(actions.map(item=>item.mitre||'—').filter(item=>item!=='—'))].map(mitre=>({label:'MITRE technique',value:mitre,mitre,risk:riskFor(mitre),icon:'⌬'})),actionNodes=actions.length?actions.map(item=>({label:item.kind,value:item.value,mitre:item.mitre||'—',risk:riskFor(item.mitre||'—'),icon:'⚙'})):[{label:'Observed action',value:'No action returned yet.',mitre:'—',risk:'low',icon:'○'}],mitreNodes=uniqueMitre.length?uniqueMitre:[{label:'MITRE technique',value:'No mapped technique.',mitre:'—',risk:'low',icon:'⌬'}],networkNodes=network.length?network.map(item=>({label:item.kind,value:item.value,mitre:'T1071.001 · Web Protocols',risk:'medium',icon:'↗'})):[{label:'Network request',value:'No request returned yet.',mitre:'—',risk:'low',icon:'◌'}],verdict=dynamicTree.closest('.dynamic-analysis-output').querySelector('.url-verdict')?.textContent.trim()||'Unknown',stages=[[{label:'Sandbox',value:dynamicTree.dataset.provider,mitre:'—',risk:'low',icon:'▶'}],actionNodes,mitreNodes,networkNodes,[{label:'Provider verdict',value:verdict,mitre:'—',risk:verdict==='Malicious'?'high':verdict==='Suspicious'?'medium':'low',icon:'!'}]],height=Math.max(340,Math.max(...stages.map(stage=>stage.length))*125+85),width=stages.length*230+35,graph=document.createElement('div'),svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),defs=document.createElementNS('http://www.w3.org/2000/svg','defs'),marker=document.createElementNS('http://www.w3.org/2000/svg','marker');graph.className='activity-graph';graph.style.width=`${width}px`;graph.style.height=`${height}px`;svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.setAttribute('width',width);svg.setAttribute('height',height);marker.setAttribute('id','activity-arrow');marker.setAttribute('markerWidth','7');marker.setAttribute('markerHeight','7');marker.setAttribute('refX','6');marker.setAttribute('refY','3.5');marker.setAttribute('orient','auto');const arrow=document.createElementNS('http://www.w3.org/2000/svg','path');arrow.setAttribute('d','M0,0 L7,3.5 L0,7 z');arrow.setAttribute('fill','currentColor');marker.append(arrow);defs.append(marker);svg.append(defs);graph.append(svg);const positioned=stages.map((stage,stageIndex)=>stage.map((node,index)=>({...node,x:18+stageIndex*230,y:42+(height-85-stage.length*104)/(stage.length+1)+(index+1)*104})));const connect=(from,to)=>{const path=document.createElementNS('http://www.w3.org/2000/svg','path'),x1=from.x+170,y1=from.y+43,x2=to.x,y2=to.y+43,bend=(x2-x1)*.48;path.setAttribute('d',`M ${x1} ${y1} C ${x1+bend} ${y1}, ${x2-bend} ${y2}, ${x2} ${y2}`);path.setAttribute('class',`activity-link ${to.risk}`);path.setAttribute('marker-end','url(#activity-arrow)');svg.append(path)};positioned.slice(1).forEach((stage,index)=>stage.forEach(node=>{const previous=positioned[index];if(index===1){const source=actionNodes.find(item=>item.mitre===node.mitre);connect(source?positioned[index][actionNodes.indexOf(source)]:previous[0],node)}else previous.forEach(parent=>connect(parent,node)}));positioned.flat().forEach(node=>{const card=document.createElement('button'),icon=document.createElement('b'),label=document.createElement('small'),value=document.createElement('strong'),mitre=document.createElement('code'),badge=document.createElement('i');card.type='button';card.className=`activity-node ${node.risk}`;card.style.left=`${node.x}px`;card.style.top=`${node.y}px`;icon.textContent=node.icon;label.textContent=node.label;value.textContent=node.value;mitre.textContent=node.mitre;badge.textContent=node.risk;card.append(icon,label,value,mitre,badge);card.addEventListener('click',()=>card.classList.toggle('expanded'));graph.append(card)});dynamicTree.append(graph)}</script>
+<script>
+(() => {
+  const tabs = document.querySelectorAll('[data-report-tab]');
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      tabs.forEach((item) => {
+        const panel = document.getElementById(item.dataset.reportTab);
+        const active = item === tab;
+        item.classList.toggle('active', active);
+        item.setAttribute('aria-selected', String(active));
+        if (panel) panel.hidden = !active;
+      });
+    });
+  });
+  const tree = document.querySelector('#dynamic-process-tree-current');
+  if (!tree) return;
+  try {
+    const actions = JSON.parse(tree.dataset.actions || '[]').slice(0, 8);
+    const network = JSON.parse(tree.dataset.network || '[]').slice(0, 6);
+    const riskFor = (mitre) => mitre === '—' ? 'low' : /T1055|T1547|T1105/.test(mitre) ? 'high' : 'medium';
+    const actionNodes = actions.length ? actions.map((item) => ({ action: item.action || item.kind || 'Observed action', command: item.command || item.value || 'No command returned.', mitre: item.mitre || '—', risk: item.severity || riskFor(item.mitre || '—'), icon: '⚙', group: 'action' })) : [{ action: 'Observed action', command: 'No action returned yet.', mitre: '—', risk: 'low', icon: '○', group: 'action' }];
+    const networkNodes = network.map((item) => ({ action: item.kind || 'Network request', command: item.value || 'No request returned.', mitre: item.mitre || 'T1071.001 · Web Protocols', risk: item.severity || 'medium', icon: '↗', group: 'network' }));
+    const cardWidth = 220;
+    const cardHeight = 126;
+    const gapX = 46;
+    const gapY = 70;
+    const columns = 3;
+    const widest = Math.max(Math.min(columns, actionNodes.length), Math.min(columns, networkNodes.length || 1));
+    const width = Math.max(760, widest * cardWidth + (widest - 1) * gapX + 80);
+    const actionRows = Math.ceil(actionNodes.length / columns);
+    const networkRows = Math.ceil(networkNodes.length / columns);
+    const actionTop = 190;
+    const networkTop = actionTop + actionRows * (cardHeight + gapY) + 45;
+    const height = Math.max(460, networkTop + Math.max(networkRows, 1) * (cardHeight + gapY) + 45);
+    const centerRow = (nodes, top) => nodes.map((node, index) => {
+      const row = Math.floor(index / columns);
+      const rowNodes = nodes.slice(row * columns, (row + 1) * columns);
+      const rowWidth = rowNodes.length * cardWidth + Math.max(0, rowNodes.length - 1) * gapX;
+      return { ...node, x: (width - rowWidth) / 2 + (index % columns) * (cardWidth + gapX), y: top + row * (cardHeight + gapY) };
+    });
+    const root = { action: 'Sandbox submission', command: tree.dataset.provider, mitre: '—', risk: 'low', icon: '▶', group: 'root', x: (width - cardWidth) / 2, y: 20 };
+    const placedActions = centerRow(actionNodes, actionTop);
+    const placedNetwork = centerRow(networkNodes, networkTop);
+    const graph = document.createElement('div');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+    const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    graph.className = 'activity-graph activity-flow';
+    graph.style.width = `${width}px`;
+    graph.style.height = `${height}px`;
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('width', width);
+    svg.setAttribute('height', height);
+    marker.setAttribute('id', 'dynamic-flow-arrow');
+    marker.setAttribute('markerWidth', '7');
+    marker.setAttribute('markerHeight', '7');
+    marker.setAttribute('refX', '6');
+    marker.setAttribute('refY', '3.5');
+    marker.setAttribute('orient', 'auto');
+    arrow.setAttribute('d', 'M0,0 L7,3.5 L0,7 z');
+    arrow.setAttribute('fill', 'currentColor');
+    marker.append(arrow);
+    defs.append(marker);
+    svg.append(defs);
+    graph.append(svg);
+    const connect = (from, to) => {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const startX = from.x + cardWidth / 2;
+      const startY = from.y + cardHeight;
+      const endX = to.x + cardWidth / 2;
+      const endY = to.y;
+      const bendY = (endY - startY) * .45;
+      path.setAttribute('d', `M ${startX} ${startY} C ${startX} ${startY + bendY}, ${endX} ${endY - bendY}, ${endX} ${endY}`);
+      path.setAttribute('class', `activity-link ${to.risk}`);
+      path.setAttribute('marker-end', 'url(#dynamic-flow-arrow)');
+      svg.append(path);
+    };
+    placedActions.forEach((node) => connect(root, node));
+    placedNetwork.forEach((node, index) => connect(placedActions[index % placedActions.length] || root, node));
+    [root, ...placedActions, ...placedNetwork].forEach((node) => {
+      const card = document.createElement('button');
+      const icon = document.createElement('b');
+      const label = document.createElement('small');
+      const commandLabel = document.createElement('span');
+      const command = document.createElement('strong');
+      const mitre = document.createElement('code');
+      const badge = document.createElement('i');
+      card.type = 'button';
+      card.className = `activity-node ${node.risk}${node.group === 'root' ? ' flow-root' : ''}`;
+      card.setAttribute('aria-expanded', 'false');
+      card.style.left = `${node.x}px`;
+      card.style.top = `${node.y}px`;
+      icon.textContent = node.icon;
+      label.textContent = node.group === 'network' ? 'Network activity' : `Action · ${node.action}`;
+      commandLabel.className = 'activity-command-label';
+      commandLabel.textContent = node.group === 'root' ? 'Provider' : 'Command / observed value';
+      command.textContent = node.command;
+      mitre.textContent = node.mitre === '—' ? 'MITRE · Unmapped' : `MITRE · ${node.mitre}`;
+      badge.textContent = node.group === 'root' ? 'Start' : `Threat · ${node.risk}`;
+      card.append(icon, label, commandLabel, command, mitre, badge);
+      card.addEventListener('click', () => {
+        const expanded = !card.classList.contains('expanded');
+        card.classList.toggle('expanded', expanded);
+        card.setAttribute('aria-expanded', String(expanded));
+      });
+      graph.append(card);
+    });
+    tree.replaceChildren(graph);
+  } catch (error) {
+    tree.textContent = 'Dynamic activity data could not be rendered.';
+  }
+})();
+</script>
+{% endblock %}

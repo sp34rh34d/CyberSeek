@@ -1,0 +1,9 @@
+Flask>=3.0,<4.0
+dnspython>=2.6,<3.0
+python-dotenv>=1.0,<2.0
+playwright>=1.50,<2.0
+extract-msg>=0.54,<0.56
+cryptography>=39,<51
+tzdata>=2025,<2027; platform_system == "Windows"
+pyzipper>=0.3.6,<0.4
+qrcode[pil]>=7.4,<9.0
