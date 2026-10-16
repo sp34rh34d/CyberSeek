@@ -26,6 +26,8 @@ It is designed to **support investigation and prioritization**. It is not an exp
 - [Development & testing](#development--testing)
 - [Project layout](#project-layout)
 
+<img width="1643" height="910" alt="Captura de pantalla 2026-10-16 a la(s) 3 58 27 p  m" src="https://github.com/user-attachments/assets/66ced070-ea8d-482e-bf2a-db3870eef822" />
+
 ---
 
 ## Key features
