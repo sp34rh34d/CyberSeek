@@ -12,7 +12,7 @@ from flask import flash, jsonify, make_response, redirect, render_template, requ
 
 from utils.dns import resolves_to_non_public_ip, valid_dns_target
 from utils.local_heuristics import ingest_local_intelligence
-from utils.task_access import delete_owned_task, is_private_task, visible_task, visible_tasks
+from utils.task_access import delete_owned_task, is_private_task, module_history, visible_task
 
 
 DNSBL_PROVIDERS = (
@@ -160,8 +160,7 @@ def register_blacklist_routes(app, database, db, current_user, login_required):
                 threading.Thread(target=run_blacklist_task, args=(database, task_id, target), daemon=True).start()
                 flash("Blacklist task started. It will continue while you navigate the application.", "success")
                 return redirect(url_for("blacklist_check"))
-        tasks = visible_tasks(db(), "blacklist_tasks", current_user()["id"])
-        return render_template("blacklist.html", tasks=tasks, requested_target=request.args.get("target", "").strip())
+        return render_template("blacklist.html", history=module_history(db(), "blacklist", current_user()["id"], request.args), requested_target=request.args.get("target", "").strip())
 
     @app.route("/recon/blacklist/<task_id>")
     @login_required

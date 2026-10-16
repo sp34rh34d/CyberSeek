@@ -17,7 +17,7 @@ from flask import flash, redirect, render_template, request, url_for
 from utils.dns import resolves_to_non_public_ip
 from utils.reputation import virustotal_domain_associations
 from utils.source_config import source_api_settings
-from utils.task_access import delete_owned_task, is_private_task, visible_task, visible_tasks
+from utils.task_access import delete_owned_task, is_private_task, module_history, visible_task
 
 
 DISCOVERY_SOURCES = {
@@ -660,9 +660,9 @@ def _surface_progress_items(task):
         return []
 
 
-def _surface_tasks(connection, user_id):
+def _surface_tasks(rows):
     tasks = []
-    for row in visible_tasks(connection, "surface_tasks", user_id):
+    for row in rows:
         task = dict(row)
         try:
             task["selected_sources"] = [source for source in json.loads(task["sources"]) if source in DISCOVERY_SOURCES]
@@ -712,7 +712,9 @@ def register_surface_routes(app, database, db, current_user, login_required):
                 threading.Thread(target=_run_surface_probe, args=(database, task_id), daemon=True).start()
                 flash("Surface monitoring started. Probes continue while you use other views.", "success")
                 return redirect(url_for("surface_monitoring"))
-        return render_template("surface.html", tasks=_surface_tasks(db(), current_user()["id"]), sources=DISCOVERY_SOURCES)
+        history = module_history(db(), "surface", current_user()["id"], request.args)
+        history["items"] = _surface_tasks(history["items"])
+        return render_template("surface.html", history=history, sources=DISCOVERY_SOURCES)
 
     @app.get("/monitoring/surface/<task_id>")
     @login_required

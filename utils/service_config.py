@@ -12,6 +12,8 @@ SERVICE_DEFAULTS = {
     "SESSION_COOKIE_HTTPONLY": True,
     "SESSION_COOKIE_SAMESITE": "Lax",
     "WTF_CSRF_SSL_STRICT": False,
+    "UPLOAD_RETENTION_DAYS": 0,
+    "DYNAMIC_SANDBOX_MINUTES": 10,
 }
 
 
@@ -48,4 +50,6 @@ def service_settings():
         "SESSION_COOKIE_HTTPONLY": _boolean(parser, "SESSION_COOKIE_HTTPONLY"),
         "SESSION_COOKIE_SAMESITE": same_site,
         "WTF_CSRF_SSL_STRICT": _boolean(parser, "WTF_CSRF_SSL_STRICT"),
+        "UPLOAD_RETENTION_DAYS": _bounded_int(parser.get("service", "UPLOAD_RETENTION_DAYS", fallback=0), 0, 0, 3650),
+        "DYNAMIC_SANDBOX_MINUTES": _bounded_int(parser.get("service", "DYNAMIC_SANDBOX_MINUTES", fallback=10), 10, 1, 60),
     }

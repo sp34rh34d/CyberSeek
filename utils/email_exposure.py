@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 from flask import flash, redirect, render_template, request, url_for
 
-from utils.task_access import delete_owned_task, is_private_task, visible_task, visible_tasks
+from utils.task_access import delete_owned_task, is_private_task, module_history, visible_task
 
 
 EMAIL_PATTERN = re.compile(r"(?i)^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$")
@@ -82,7 +82,10 @@ def register_email_exposure_routes(app, database, db, current_user, login_requir
             threading.Thread(target=run_email_exposure_task, args=(database, task_id, email), daemon=True).start()
             flash("Email exposure task started. It will continue while you navigate the application.", "success")
             return redirect(url_for("email_exposure"))
-        return render_template("email_exposure.html", tasks=visible_tasks(db(), "email_exposure_tasks", current_user()["id"]))
+        return render_template(
+            "email_exposure.html", history=module_history(db(), "email_exposure", current_user()["id"], request.args),
+            requested_email=request.args.get("email", "").strip() if request.method == "GET" else "",
+        )
 
     @app.get("/monitoring/email-exposure/<task_id>")
     @login_required

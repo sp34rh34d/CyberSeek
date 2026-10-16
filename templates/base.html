@@ -1,38 +1,65 @@
-<!doctype html>
+{% from '_macros.html' import icon with context %}<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="color-scheme" content="dark light">
   <title>{% block title %}Cyberseek{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='overrides.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  {% block head %}{% endblock %}
 </head>
-<body class="{% if current_user() %}signed-in{% else %}guest{% endif %}">
+<body class="{% if current_user() %}signed-in{% else %}guest{% endif %}"{% if live_task is defined %} data-task-id="{{ live_task.id }}" data-task-status-url="{{ live_task.status_url }}"{% endif %}>
+<script nonce="{{ csp_nonce() }}">(function(){var t;try{t=localStorage.getItem('cyberseek-theme')}catch(e){}if(t!=='light'&&t!=='dark')t=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.body.dataset.theme=t})()</script>
 {% if current_user() %}
-  <button class="theme-toggle global-theme-toggle" type="button" aria-label="Toggle color theme">[ LIGHT ]</button>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="sidebar-top"><a class="brand" href="{{ url_for('surface_monitoring') }}">CYBERSEEK</a></div>
-      <br>
-      <nav class="side-menu">
+      <div class="sidebar-top">
+        <a class="brand" href="{{ url_for('dashboard') }}">
+          <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg></span>
+          <span class="brand-word">CyberSeek</span>
+        </a>
+        <button class="menu-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="side-menu"><svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg></button>
+      </div>
+      <nav class="side-menu" id="side-menu" aria-label="Modules">
+        <section class="menu-group"><p>Workspace</p><a class="{{ 'active' if request.endpoint == 'dashboard' }}" href="{{ url_for('dashboard') }}" {{ 'aria-current=page' if request.endpoint == 'dashboard' }}>{{ icon('overview') }}<span>Overview</span></a><a class="{{ 'active' if request.endpoint == 'global_search' }}" href="{{ url_for('global_search') }}" {{ 'aria-current=page' if request.endpoint == 'global_search' }}>{{ icon('reputation') }}<span>Search</span></a></section>
+        {% for group in navigation() %}
+        <section class="menu-group"><p>{{ group.label }}</p>{% for item in group['items'] %}{% set is_active = request.path.startswith(item.prefixes) %}<a class="{{ 'active' if is_active }}" href="{{ url_for(item.endpoint) }}" {{ 'aria-current=page' if is_active }}>{{ icon(item.key) }}<span>{{ item.label }}</span></a>{% endfor %}</section>
+        {% endfor %}
         {% if current_user()['is_admin'] %}
-          <section class="menu-group"><p>ADMINISTRATIVE</p><a href="{{ url_for('manage_users') }}">Users</a><a href="{{ url_for('source_apis') }}">Source APIs</a></section>
+        <section class="menu-group"><p>Administrative</p>{% for item in admin_items %}{% set is_active = request.path.startswith(item.prefixes) %}<a class="{{ 'active' if is_active }}" href="{{ url_for(item.endpoint) }}" {{ 'aria-current=page' if is_active }}>{{ icon(item.key) }}<span>{{ item.label }}</span></a>{% endfor %}</section>
         {% endif %}
-        <section class="menu-group"><p>MONITORING</p><a href="{{ url_for('surface_monitoring') }}">Surface</a><a href="{{ url_for('email_exposure') }}">Email exposure</a></section>
-        <section class="menu-group"><p>RECONNAISSANCE</p><a href="{{ url_for('dns_queries') }}">DNS query</a><a href="{{ url_for('whois_lookup') }}">WHOIS lookup</a><a href="{{ url_for('blacklist_check') }}">Blacklist check</a><a href="{{ url_for('spf_check') }}">SPF check</a></section>
-        <section class="menu-group"><p>ANALYSIS</p><a href="{{ url_for('file_scan') }}">File scan</a><a href="{{ url_for('reputation_lookup') }}">Reputation lookup</a><a href="{{ url_for('live_url_analysis') }}">Live URL analysis</a><a href="{{ url_for('eml_analysis') }}">EML scan</a></section>
       </nav>
-      <div class="side-bottom"><span>{{ current_user()['name'] }}</span><div class="account-actions"><a class="account-password-link" href="{{ url_for('change_password') }}">Passwd</a><a class="account-password-link" href="{{ url_for('two_factor_settings') }}">2FA</a><form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button>Singout</button></form></div></div>
     </aside>
     <main class="content">
+      <header class="topbar">
+        <form class="global-search" action="{{ url_for('global_search') }}" method="get" role="search">
+          <label class="visually-hidden" for="global-search-input">Search indicators and tasks</label>
+          {{ icon('reputation', 14) }}
+          <input id="global-search-input" type="search" name="q" value="{{ request.args.get('q', '') if request.endpoint == 'global_search' }}" placeholder="Search IoCs, targets, files…  ( / )" autocomplete="off" data-global-search>
+        </form>
+        <button class="theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme">
+          <svg class="theme-icon-sun" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3 3l1.1 1.1M11.9 11.9 13 13M3 13l1.1-1.1M11.9 4.1 13 3"/></svg>
+          <svg class="theme-icon-moon" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M13.5 10.2A5.8 5.8 0 0 1 5.8 2.5a5.8 5.8 0 1 0 7.7 7.7Z"/></svg>
+        </button>
+        <details class="topbar-account">
+          <summary><span class="topbar-user-avatar">{{ current_user()['name'][0]|upper }}</span><span class="topbar-user-name">{{ current_user()['name'] }}</span></summary>
+          <div class="topbar-account-menu">
+            <a href="{{ url_for('change_password') }}">Password</a>
+            <a href="{{ url_for('two_factor_settings') }}">Two-factor authentication</a>
+            <form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Sign out</button></form>
+          </div>
+        </details>
+      </header>
 {% else %}
   <main class="auth-shell">
 {% endif %}
-{% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+{% with messages=get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-stack" role="status">{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
 {% block content %}{% endblock %}
+{% if task_notes is defined and task_notes %}{% include '_task_notes.html' %}{% endif %}
 </main>
 {% if current_user() %}</div>{% endif %}
-<script>const b=document.body,t=document.querySelector('.theme-toggle'),csrf=document.querySelector('meta[name="csrf-token"]')?.content;const apply=x=>{b.dataset.theme=x;if(t)t.textContent=x==='dark'?'[ LIGHT ]':'[ DARK ]'};apply(localStorage.getItem('cyberseek-theme')||'dark');t&&t.addEventListener('click',()=>{const x=b.dataset.theme==='dark'?'light':'dark';localStorage.setItem('cyberseek-theme',x);apply(x)});csrf&&document.querySelectorAll('form').forEach(form=>{if(form.method.toLowerCase()!=='post'||form.querySelector('input[name="csrf_token"]'))return;const input=document.createElement('input');input.type='hidden';input.name='csrf_token';input.value=csrf;form.prepend(input)})</script>
 </body>
 </html>

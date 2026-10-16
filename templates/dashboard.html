@@ -1,1 +1,69 @@
-{% extends 'base.html' %}{% block title %}Cyberseek{% endblock %}{% block content %}{% endblock %}
+{% extends 'base.html' %}
+{% from '_macros.html' import icon, status_badge, timestamp with context %}
+{% block title %}Overview · Cyberseek{% endblock %}
+{% block content %}
+<div class="page-intro"><p class="eyebrow">WORKSPACE</p><h1>Overview</h1><p class="page-lead">Activity across every module you can see: running work, recent tasks, and indicators that came back malicious or suspicious.</p></div>
+
+{% set active_total = cards|sum(attribute='active') %}
+{% set week_total = cards|sum(attribute='week') %}
+{% set failed_total = cards|sum(attribute='failed_week') %}
+<div class="stat-row overview-stats">
+  <div class="stat-card stat-info"><span class="stat-value">{{ active_total }}</span><span class="stat-label">Active now</span></div>
+  <div class="stat-card"><span class="stat-value">{{ week_total }}</span><span class="stat-label">Tasks · last 7 days</span></div>
+  <div class="stat-card stat-danger"><span class="stat-value">{{ failed_total }}</span><span class="stat-label">Failed · last 7 days</span></div>
+  <div class="stat-card {{ 'stat-success' if api_configured else '' }}"><span class="stat-value">{{ api_configured }}/{{ api_total }}</span><span class="stat-label">Source APIs configured{{ ' · AI on' if ai_configured }}</span></div>
+</div>
+
+<div class="overview-grid">
+  <section class="formal-output overview-panel">
+    <div class="output-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>Latest tasks</h2></div></div>
+    {% if recent %}
+    <ol class="overview-list">
+      {% for task in recent %}
+      <li>
+        <span class="overview-module">{{ icon(task['module']) }}<span>{{ modules[task['module']].label }}</span></span>
+        <a class="overview-title" href="{{ url_for(modules[task['module']].view, task_id=task['id']) }}">{{ task['title'] }}</a>
+        <span class="overview-meta">{{ 'You' if task['user_id'] == current_user()['id'] else task['owner_name'] }} · {{ timestamp(task['created_at']) }}</span>
+        {{ status_badge(task['status']) }}
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="empty">No tasks yet.<span class="empty-hint">Pick a module from the menu to run your first query.</span></p>
+    {% endif %}
+  </section>
+
+  <section class="formal-output overview-panel">
+    <div class="output-heading"><div><p class="eyebrow">LOCAL INTELLIGENCE</p><h2>Flagged indicators</h2></div></div>
+    {% if flagged %}
+    <ol class="overview-list">
+      {% for item in flagged %}
+      <li>
+        <span class="url-verdict {{ item.verdict|lower }}">{{ item.verdict }}</span>
+        <a class="overview-title" href="{{ url_for('global_search', q=item.indicator_value) }}"><code>{{ item.indicator_value }}</code></a>
+        <span class="overview-meta">{{ item.indicator_type }} · {{ item.tasks }} task{{ 's' if item.tasks != 1 }} · {{ timestamp(item.last_seen) }}</span>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="empty">No malicious or suspicious indicators yet.<span class="empty-hint">Reputation, blacklist, file, and live URL results feed this list.</span></p>
+    {% endif %}
+  </section>
+</div>
+
+<p class="section-label">Modules</p>
+<div class="module-grid">
+  {% for card in cards %}
+  <a class="module-card" href="{{ url_for(card.endpoint) }}">
+    <span class="module-card-head">{{ icon(card.key, 18) }}<strong>{{ card.label }}</strong></span>
+    <span class="module-card-group">{{ card.group }}</span>
+    <span class="module-card-facts">
+      <span><b>{{ card.total }}</b> total</span>
+      {% if card.active %}<span class="is-active"><b>{{ card.active }}</b> active</span>{% endif %}
+      {% if card.failed_week %}<span class="is-failed"><b>{{ card.failed_week }}</b> failed this week</span>{% endif %}
+    </span>
+    <span class="module-card-last">{% if card.last_at %}Last task {{ timestamp(card.last_at) }}{% else %}No tasks yet{% endif %}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

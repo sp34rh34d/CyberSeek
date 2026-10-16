@@ -2,17 +2,34 @@
 {% block title %}Blacklist report · Cyberseek{% endblock %}
 {% block content %}
 <section class="task-view blacklist-report">
-  <div class="task-topbar"><a class="back-link" href="{{ url_for('blacklist_check') }}"> Back to blacklist checks</a><details class="task-export"><summary>Export</summary><a href="{{ url_for('export_blacklist_task', task_id=task['id'], export_format='json') }}">JSON</a><a href="{{ url_for('export_blacklist_task', task_id=task['id'], export_format='html') }}">HTML</a></details></div>
-  <div class="task-meta"><span>{{ task['target'] }}</span><span class="task-status {{ task['status']|lower }}" data-task-status="{{ task['status'] }}">{{ task['status'] }}</span></div>
+  <div class="task-topbar"><a class="back-link" href="{{ url_for('blacklist_check') }}">Back to blacklist checks</a><details class="task-export"><summary>Export</summary><a href="{{ url_for('export_blacklist_task', task_id=task['id'], export_format='json') }}">JSON</a><a href="{{ url_for('export_blacklist_task', task_id=task['id'], export_format='html') }}">HTML</a></details></div>
+  <div class="task-summary-card"><div class="task-summary-head"><h2 class="task-meta-target">{{ task['target'] }}</h2><span class="task-status {{ task['status']|lower }}" data-task-status="{{ task['status'] }}">{{ task['status'] }}</span></div><div class="task-summary-facts"><span class="task-owner">{{ 'You' if task['user_id'] == current_user()['id'] else task['owner_name'] }}</span><span class="task-visibility {{ 'private' if task['is_private'] else 'shared' }}">{{ 'Private' if task['is_private'] else 'Shared' }}</span><span class="task-owner">{{ task['created_at'][:16]|replace('T',' ') }} UTC</span></div></div>
   {% if task['status'] == 'Running' %}
-    <p>This reputation check is still running. This page refreshes automatically every 5 seconds.</p>
+    <p>This reputation check is still running. The results appear here automatically when it finishes.</p>
   {% elif task['error'] %}
     <pre class="dns-output error-output">{{ task['error'] }}</pre>
   {% else %}
     {% set local = report.get('local_heuristic', {}) %}
+    {% set statuses = report['checks'] | map(attribute='status') | list %}
+    {% set listed_count = statuses | select('equalto', 'Listed') | list | length %}
+    {% set overall_verdict = 'Listed' if listed_count > 0 else ('Clean' if statuses|length > 0 else 'Unknown') %}
+
+    <section class="blacklist-summary">
+      <div class="blacklist-summary-verdict">
+        <span class="reputation {{ overall_verdict|lower }}">{{ overall_verdict }}</span>
+        <div><p class="eyebrow">OVERALL ASSESSMENT</p><p class="blacklist-summary-detail">{% if listed_count %}This target is listed on {{ listed_count }} of {{ statuses|length }} checked blacklist source{{ '' if statuses|length == 1 else 's' }}.{% elif statuses %}This target was not found on any of the {{ statuses|length }} checked blacklist sources.{% else %}No blacklist source response is available for this target.{% endif %}</p></div>
+      </div>
+      <dl class="blacklist-summary-facts">
+        <div><dt>Sources checked</dt><dd>{{ statuses|length }}</dd></div>
+        <div><dt>Listed</dt><dd>{{ listed_count }}</dd></div>
+        <div><dt>Resolved IPs</dt><dd>{{ report['resolved_ips']|length }}</dd></div>
+        <div><dt>Catalog size</dt><dd>{{ report.get('catalog_size', 31) }}</dd></div>
+      </dl>
+    </section>
+
     <section class="formal-output blacklist-output"><div class="output-heading"><div><p class="eyebrow">REPUTATION REPORT</p><h2>Blacklist sources</h2></div><span>{{ report['checks']|length }} checks · {{ report.get('catalog_size', 31) }} configured sources</span></div><p class="resolved">Resolved public IPs: {{ report['resolved_ips']|join(', ') or 'None' }}</p><div class="table-wrap"><table><thead><tr><th>Source</th><th>Checked target</th><th>Type</th><th>Result</th><th>Response</th><th>De-listing</th></tr></thead><tbody>{% for check in report['checks'] %}<tr><td><strong>{{ check['provider'] }}</strong></td><td>{{ check['subject'] }}</td><td>{{ check['kind']|upper }}</td><td><span class="reputation {{ check['status']|lower }}">{{ check['status'] }}</span></td><td><code>{{ check['answers'] }}</code></td><td class="delist-cell">{% if check['status'] == 'Listed' and check['delist_url'] %}<a class="text-button" href="{{ check['delist_url'] }}" target="_blank" rel="noopener noreferrer">Request de-listing ↗</a>{% else %}<span class="self-label">Not available</span>{% endif %}</td></tr>{% else %}<tr><td colspan="6" class="empty">No blacklist source response is available.</td></tr>{% endfor %}</tbody></table></div></section>
-    {% if local %}<section class="formal-output local-heuristic-output"><div class="output-heading"><div><p class="eyebrow">LOCAL HEURISTICS</p><h2>Historical correlation</h2></div><span class="url-verdict {{ local.get('verdict', 'unknown')|lower }}">{{ local.get('verdict', 'Unknown') }}</span></div><p>{{ local.get('tracked_indicators', 0) }} indicators · {{ local.get('observations', 0) }} local observations · {{ local.get('confidence', 'Low') }} confidence</p></section>{% endif %}
+    {% if local %}<section class="formal-output local-heuristic-output"><div class="output-heading"><div><p class="eyebrow">LOCAL HEURISTICS</p><h2>Historical correlation</h2></div><span class="url-verdict {{ local.get('verdict', 'unknown')|lower }}">{{ local.get('verdict', 'Unknown') }}</span></div><p>{{ local.get('tracked_indicators', 0) }} indicators &middot; {{ local.get('observations', 0) }} local observations &middot; {{ local.get('confidence', 'Low') }} confidence</p></section>{% endif %}
   {% endif %}
 </section>
-<script>if(document.querySelector('[data-task-status="Running"]'))setTimeout(()=>location.reload(),5000)</script>
+
 {% endblock %}

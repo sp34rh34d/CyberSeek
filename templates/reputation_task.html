@@ -3,53 +3,75 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', filename='reputation.css') }}">
 <section class="task-view reputation-report">
-  <div class="task-topbar"><a class="back-link" href="{{ url_for('reputation_lookup') }}"> Back to reputation lookups</a><details class="task-export"><summary>Export</summary><a href="{{ url_for('export_reputation_lookup', task_id=task['id'], export_format='json') }}">JSON</a><a href="{{ url_for('export_reputation_lookup', task_id=task['id'], export_format='html') }}">HTML</a></details></div>
-  <div class="task-meta">
-    <span>{{ task['target'] }}</span><span>{{ report.get('target_type', 'indicator')|upper }}</span>
-    <span>{{ report.get('visible_engine_label', 'ALL' if task['engine'] == 'all' else task['engine']|upper) }}</span>
-    <span class="task-status {{ task['status']|lower }}" data-task-status="{{ task['status'] }}">{{ task['status'] }}</span>
-  </div>
+  <div class="task-topbar"><a class="back-link" href="{{ url_for('reputation_lookup') }}">Back to reputation lookups</a><details class="task-export"><summary>Export</summary><a href="{{ url_for('export_reputation_lookup', task_id=task['id'], export_format='json') }}">JSON</a><a href="{{ url_for('export_reputation_lookup', task_id=task['id'], export_format='html') }}">HTML</a></details></div>
+  <div class="task-summary-card"><div class="task-summary-head"><h2 class="task-meta-target">{{ task['target'] }}</h2><span class="task-status {{ task['status']|lower }}" data-task-status="{{ task['status'] }}">{{ task['status'] }}</span></div><div class="task-summary-facts"><span class="task-owner">{{ report.get('target_type', 'indicator')|upper }}</span><span class="task-owner">{{ report.get('visible_engine_label', 'ALL' if task['engine'] == 'all' else task['engine']|upper) }}</span><span class="task-owner">{{ 'You' if task['user_id'] == current_user()['id'] else task['owner_name'] }}</span><span class="task-visibility {{ 'private' if task['is_private'] else 'shared' }}">{{ 'Private' if task['is_private'] else 'Shared' }}</span><span class="task-owner">{{ task['created_at'][:16]|replace('T',' ') }} UTC</span></div></div>
   {% if task['status'] == 'Running' %}
-    <p>This reputation lookup is still running. This page refreshes automatically every 5 seconds.</p>
+    <p>This reputation lookup is still running. The results appear here automatically when it finishes.</p>
   {% elif task['error'] %}
     <pre class="dns-output error-output">{{ task['error'] }}</pre>
   {% else %}
     {% set associations = report.get('associations', {}) %}
     {% set verdicts = report.get('vt_verdict_summary', {'malicious': 0, 'suspicious': 0, 'clean': 0, 'unknown': 0, 'total': 0}) %}
-    {% macro vt_chart() %}<div class="vt-chart-container" role="img" aria-label="VirusTotal engine verdict distribution: {{ verdicts['malicious'] }} malicious, {{ verdicts['suspicious'] }} suspicious, {{ verdicts['clean'] }} clean, {{ verdicts['unknown'] }} unknown."><canvas id="vt-verdict-chart" data-malicious="{{ verdicts['malicious'] }}" data-suspicious="{{ verdicts['suspicious'] }}" data-clean="{{ verdicts['clean'] }}" data-unknown="{{ verdicts['unknown'] }}"></canvas></div>{% endmacro %}
-    <section class="formal-output verdict-overview">
-      <div class="output-heading"><div><p class="eyebrow">VERDICT SUMMARY</p><h2>Source verdicts</h2></div><span>{{ report['results']|length }} sources</span></div>
-      <div class="verdict-cards">
-        {% for item in report['results'] %}
-          <article><small>ENGINE</small><strong>{{ item['engine'] }}</strong><span class="url-verdict {{ item['verdict']|lower }}">{{ item['verdict'] }}</span></article>
-        {% else %}
-          <p class="empty">No source verdicts are available.</p>
-        {% endfor %}
-      </div>
-    </section>
-
     {% set soc = report.get('soc_summary', {}) %}
-    <section class="formal-output soc-summary">
-      <div class="output-heading"><div><p class="eyebrow">AI SOC ANALYST</p><h2>Triage assessment</h2></div><div class="soc-heading-actions"><span class="soc-source">{{ soc.get('source', 'Local correlation') }}</span><a class="text-button" href="{{ url_for('export_reputation_iocs', task_id=task['id']) }}">Export IoCs</a></div></div>
-      <div class="soc-assessment"><span class="soc-severity {{ soc.get('severity', 'Low')|lower }}">{{ soc.get('severity', 'Low') }}</span><p>{{ soc.get('assessment', 'No assessment is available.') }}</p></div>
-      <div class="soc-details"><section><h3>Evidence and verdicts</h3><ul>{% for item in soc.get('evidence', []) %}<li>{{ item }}</li>{% else %}<li>No elevated evidence was returned.</li>{% endfor %}</ul></section><section><h3>Associated intelligence</h3><ul>{% for item in soc.get('intelligence', []) %}<li>{{ item }}</li>{% else %}<li>No associated intelligence was returned.</li>{% endfor %}</ul></section><section><h3>Source coverage</h3><ul>{% for item in soc.get('coverage', []) %}<li>{{ item }}</li>{% else %}<li>No source-coverage detail is available.</li>{% endfor %}</ul></section><section><h3>Response actions</h3><ol>{% for item in soc.get('recommendations', []) %}<li>{{ item }}</li>{% else %}<li>Review the selected source results.</li>{% endfor %}</ol></section><section><h3>Coverage and limits</h3><ul>{% for item in soc.get('limitations', []) %}<li>{{ item }}</li>{% else %}<li>No material coverage limitation was recorded.</li>{% endfor %}</ul></section></div>
+    {% set local = report.get('local_heuristic', {}) %}
+    {% set overall_verdict = 'Malicious' if verdicts['malicious'] > 0 else ('Suspicious' if verdicts['suspicious'] > 0 else ('Clean' if verdicts['clean'] > 0 else 'Unknown')) %}
+    {% set indicator_total = associations.get('domains', [])|length + associations.get('subdomains', [])|length + associations.get('ips', [])|length + associations.get('files', [])|length %}
+    {% macro vt_chart() %}<div class="vt-chart-container" role="img" aria-label="VirusTotal engine verdict distribution: {{ verdicts['malicious'] }} malicious, {{ verdicts['suspicious'] }} suspicious, {{ verdicts['clean'] }} clean, {{ verdicts['unknown'] }} unknown."><canvas id="vt-verdict-chart" data-malicious="{{ verdicts['malicious'] }}" data-suspicious="{{ verdicts['suspicious'] }}" data-clean="{{ verdicts['clean'] }}" data-unknown="{{ verdicts['unknown'] }}"></canvas></div>{% endmacro %}
+
+    <section class="reputation-summary">
+      <div class="reputation-summary-verdict">
+        <span class="url-verdict {{ overall_verdict|lower }}">{{ overall_verdict }}</span>
+        <div><p class="eyebrow">OVERALL ASSESSMENT</p><p class="reputation-summary-detail">{{ soc.get('assessment', 'No assessment is available for this indicator.') }}</p></div>
+      </div>
+      <dl class="reputation-summary-facts">
+        <div><dt>Target type</dt><dd>{{ report.get('target_type', 'indicator')|capitalize }}</dd></div>
+        <div><dt>Sources evaluated</dt><dd>{{ report['results']|length }}</dd></div>
+        <div><dt>Detections</dt><dd>{{ verdicts['malicious'] }} malicious &middot; {{ verdicts['suspicious'] }} suspicious</dd></div>
+        <div><dt>Associated indicators</dt><dd>{{ indicator_total }}</dd></div>
+      </dl>
     </section>
 
-    {% set local = report.get('local_heuristic', {}) %}
-    {% if local %}<section class="formal-output local-heuristic-output"><div class="output-heading"><div><p class="eyebrow">LOCAL HEURISTICS</p><h2>Historical correlation</h2></div><span class="url-verdict {{ local.get('verdict', 'unknown')|lower }}">{{ local.get('verdict', 'Unknown') }}</span></div><p>{{ local.get('tracked_indicators', 0) }} indicators · {{ local.get('observations', 0) }} local observations · {{ local.get('confidence', 'Low') }} confidence</p></section>{% endif %}
+    <div class="report-tabs" role="tablist" aria-label="Reputation report views">
+      <button type="button" class="report-tab active" role="tab" aria-selected="true" aria-controls="rep-overview" data-report-tab="rep-overview">Overview</button>
+      <button type="button" class="report-tab" role="tab" aria-selected="false" aria-controls="rep-network" data-report-tab="rep-network">Network intelligence</button>
+      <button type="button" class="report-tab" role="tab" aria-selected="false" aria-controls="rep-engines" data-report-tab="rep-engines">Engine results</button>
+      <button type="button" class="report-tab" role="tab" aria-selected="false" aria-controls="rep-indicators" data-report-tab="rep-indicators">Related indicators</button>
+    </div>
 
-    {% if location %}
-      <section class="map-section reputation-map-section"><p class="eyebrow">NETWORK LOCATION</p><div class="reputation-visual-layout"><div id="reputation-map" data-lat="{{ location['latitude'] }}" data-lng="{{ location['longitude'] }}" data-label="{{ location['ip'] }}"></div><section class="reputation-chart-panel"><div class="vt-distribution-heading"><strong>VirusTotal engine distribution</strong><span>{{ verdicts['total'] }} engine results</span></div>{{ vt_chart() }}</section></div><aside class="network-information reputation-network-information"><p class="eyebrow">NETWORK INFORMATION</p><div><small>PUBLIC IP</small><strong>{{ location['ip'] }}</strong></div><div><small>COUNTRY</small><strong>{{ location['country'] or 'Unavailable' }}</strong></div><div><small>STATE / REGION</small><strong>{{ location['state'] or 'Unavailable' }}</strong></div><div><small>CITY</small><strong>{{ location['city'] or 'Unavailable' }}</strong></div><div><small>COORDINATES</small><strong>{{ location['latitude'] }}, {{ location['longitude'] }}</strong></div></aside></section>
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const reputationMapNode=document.querySelector('#reputation-map');const reputationLat=Number(reputationMapNode.dataset.lat),reputationLng=Number(reputationMapNode.dataset.lng),reputationMap=L.map(reputationMapNode).setView([reputationLat,reputationLng],8);L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:20}).addTo(reputationMap);const reputationPulse=L.divIcon({className:'pulse-marker',iconSize:[22,22],iconAnchor:[11,11]});L.marker([reputationLat,reputationLng],{icon:reputationPulse}).addTo(reputationMap).bindPopup(reputationMapNode.dataset.label).openPopup()</script>
-    {% else %}
-      <p class="map-unavailable">No public IP location is available for this reputation lookup.</p>
-      <section class="vt-chart-fallback"><div class="vt-distribution-heading"><strong>VirusTotal engine distribution</strong><span>{{ verdicts['total'] }} engine results</span></div>{{ vt_chart() }}</section>
-    {% endif %}
+    <section id="rep-overview" class="report-tab-panel" role="tabpanel">
+      <section class="formal-output verdict-overview">
+        <div class="output-heading"><div><p class="eyebrow">VERDICT SUMMARY</p><h2>Source verdicts</h2></div><span>{{ report['results']|length }} sources</span></div>
+        <div class="verdict-cards">
+          {% for item in report['results'] %}
+            <article><small>ENGINE</small><strong>{{ item['engine'] }}</strong><span class="url-verdict {{ item['verdict']|lower }}">{{ item['verdict'] }}</span></article>
+          {% else %}
+            <p class="empty">No source verdicts are available.</p>
+          {% endfor %}
+        </div>
+      </section>
 
-    <section class="formal-output association-output">
-      <div class="output-heading"><div><p class="eyebrow">RELATED INDICATORS</p><h2>Associated intelligence</h2></div><span>{{ associations.get('domains', [])|length + associations.get('subdomains', [])|length + associations.get('ips', [])|length + associations.get('files', [])|length }} indicators</span></div>
-      <section class="record-group vt-engine-results inline-engine-results">
-        <header><h3>VIRUSTOTAL ENGINE RESULTS</h3><span>{{ report.get('vt_engine_results', [])|length }} engine{{ '' if report.get('vt_engine_results', [])|length == 1 else 's' }}</span></header>
+      <section class="formal-output soc-summary">
+        <div class="output-heading"><div><p class="eyebrow">AI SOC ANALYST</p><h2>Triage assessment</h2></div><div class="soc-heading-actions"><span class="soc-source">{{ soc.get('source', 'Local correlation') }}</span><a class="text-button" href="{{ url_for('export_reputation_iocs', task_id=task['id']) }}">Export IoCs</a></div></div>
+        <div class="soc-assessment"><span class="soc-severity {{ soc.get('severity', 'Low')|lower }}">{{ soc.get('severity', 'Low') }}</span><p>{{ soc.get('assessment', 'No assessment is available.') }}</p></div>
+        <div class="soc-details"><section><h3>Evidence and verdicts</h3><ul>{% for item in soc.get('evidence', []) %}<li>{{ item }}</li>{% else %}<li>No elevated evidence was returned.</li>{% endfor %}</ul></section><section><h3>Associated intelligence</h3><ul>{% for item in soc.get('intelligence', []) %}<li>{{ item }}</li>{% else %}<li>No associated intelligence was returned.</li>{% endfor %}</ul></section><section><h3>Source coverage</h3><ul>{% for item in soc.get('coverage', []) %}<li>{{ item }}</li>{% else %}<li>No source-coverage detail is available.</li>{% endfor %}</ul></section><section><h3>Response actions</h3><ol>{% for item in soc.get('recommendations', []) %}<li>{{ item }}</li>{% else %}<li>Review the selected source results.</li>{% endfor %}</ol></section><section><h3>Coverage and limits</h3><ul>{% for item in soc.get('limitations', []) %}<li>{{ item }}</li>{% else %}<li>No material coverage limitation was recorded.</li>{% endfor %}</ul></section></div>
+      </section>
+
+      {% if local %}<section class="formal-output local-heuristic-output"><div class="output-heading"><div><p class="eyebrow">LOCAL HEURISTICS</p><h2>Historical correlation</h2></div><span class="url-verdict {{ local.get('verdict', 'unknown')|lower }}">{{ local.get('verdict', 'Unknown') }}</span></div><p>{{ local.get('tracked_indicators', 0) }} indicators &middot; {{ local.get('observations', 0) }} local observations &middot; {{ local.get('confidence', 'Low') }} confidence</p></section>{% endif %}
+    </section>
+
+    <section id="rep-network" class="report-tab-panel" role="tabpanel" hidden>
+      {% if location %}
+        <section class="map-section reputation-map-section"><p class="eyebrow">NETWORK LOCATION</p><div class="reputation-visual-layout"><div id="reputation-map" data-lat="{{ location['latitude'] }}" data-lng="{{ location['longitude'] }}" data-label="{{ location['ip'] }}"></div><section class="reputation-chart-panel"><div class="vt-distribution-heading"><strong>VirusTotal engine distribution</strong><span>{{ verdicts['total'] }} engine results</span></div>{{ vt_chart() }}</section></div><aside class="network-information reputation-network-information"><p class="eyebrow">NETWORK INFORMATION</p><div><small>PUBLIC IP</small><strong>{{ location['ip'] }}</strong></div><div><small>COUNTRY</small><strong>{{ location['country'] or 'Unavailable' }}</strong></div><div><small>STATE / REGION</small><strong>{{ location['state'] or 'Unavailable' }}</strong></div><div><small>CITY</small><strong>{{ location['city'] or 'Unavailable' }}</strong></div><div><small>COORDINATES</small><strong>{{ location['latitude'] }}, {{ location['longitude'] }}</strong></div></aside></section>
+        <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+      {% else %}
+        <p class="map-unavailable">No public IP location is available for this reputation lookup.</p>
+        <section class="vt-chart-fallback"><div class="vt-distribution-heading"><strong>VirusTotal engine distribution</strong><span>{{ verdicts['total'] }} engine results</span></div>{{ vt_chart() }}</section>
+      {% endif %}
+    </section>
+
+    <section id="rep-engines" class="report-tab-panel" role="tabpanel" hidden>
+      <section class="formal-output association-output">
+        <div class="output-heading"><div><p class="eyebrow">VIRUSTOTAL</p><h2>Per-engine results</h2></div><span>{{ report.get('vt_engine_results', [])|length }} engine{{ '' if report.get('vt_engine_results', [])|length == 1 else 's' }}</span></div>
         <div class="engine-result-toolbar"><label>Show<select id="vt-engine-filter" aria-label="Filter VirusTotal engine results"><option value="detected" selected>Detected only</option><option value="all">All results</option><option value="malicious">Malicious</option><option value="suspicious">Suspicious</option><option value="clean">Clean</option><option value="unknown">Unknown</option></select></label></div>
         <div class="table-wrap intelligence-table"><table><thead><tr><th>Engine</th><th>Verdict</th><th>Detection</th></tr></thead><tbody>
           {% for item in report.get('vt_engine_results', []) %}
@@ -59,39 +81,46 @@
           {% endfor %}
         </tbody></table></div>
       </section>
-      <p class="association-description">Observed relationships returned by the selected sources. Dates are displayed in UTC.</p>
-      <div class="record-groups association-record-groups">
-        <section class="record-group">
-          <header><h3>SUBDOMAINS</h3><span>{{ associations.get('subdomains', [])|length }} answer{{ '' if associations.get('subdomains', [])|length == 1 else 's' }}</span></header>
-          <div class="table-wrap intelligence-table"><table><thead><tr><th>Subdomain</th><th>First observed</th><th>Last observed</th><th>Reputation</th><th>Malicious</th><th>Suspicious</th></tr></thead><tbody>{% for item in associations.get('subdomains', []) %}<tr><td><code>{{ item['value'] if item is mapping else item }}</code></td>{% if item is mapping %}<td>{{ item['first_seen'] }}</td><td>{{ item['last_seen'] }}</td><td><span class="url-verdict {{ item.get('reputation', 'Unknown')|lower }}">{{ item.get('reputation', 'Unknown') }}</span></td><td>{{ item['malicious'] }}</td><td>{{ item['suspicious'] }}</td>{% else %}<td>Unavailable</td><td>Unavailable</td><td><span class="url-verdict unknown">Unknown</span></td><td>Unavailable</td><td>Unavailable</td>{% endif %}</tr>{% else %}<tr><td colspan="6" class="empty">No associated subdomains returned.</td></tr>{% endfor %}</tbody></table></div>
-        </section>
-        <section class="record-group">
-          <header><h3>IP ADDRESSES</h3><span>{{ associations.get('ips', [])|length }} answer{{ '' if associations.get('ips', [])|length == 1 else 's' }}</span></header>
-          <div class="table-wrap intelligence-table"><table><thead><tr><th>IP address</th><th>First observed</th><th>Last observed</th><th>Reputation</th><th>Malicious</th><th>Suspicious</th></tr></thead><tbody>{% for item in associations.get('ips', []) %}<tr><td><code>{{ item['value'] if item is mapping else item }}</code></td>{% if item is mapping %}<td>{{ item['first_seen'] }}</td><td>{{ item['last_seen'] }}</td><td><span class="url-verdict {{ item['reputation']|lower }}">{{ item['reputation'] }}</span></td><td>{{ item['malicious'] }}</td><td>{{ item['suspicious'] }}</td>{% else %}<td>Unavailable</td><td>Unavailable</td><td>Unavailable</td><td>Unavailable</td><td>Unavailable</td>{% endif %}</tr>{% else %}<tr><td colspan="6" class="empty">No associated IPs returned.</td></tr>{% endfor %}</tbody></table></div>
-        </section>
-        <section class="record-group">
-          <header><h3>FILES</h3><span>{{ associations.get('files', [])|length }} answer{{ '' if associations.get('files', [])|length == 1 else 's' }}</span></header>
-          <div class="table-wrap intelligence-table"><table><thead><tr><th>File name</th><th>MD5</th><th>SHA-256</th><th>Malicious</th><th>Suspicious</th></tr></thead><tbody>{% for item in associations.get('files', []) %}<tr>{% if item is mapping %}<td><strong>{{ item['name'] }}</strong></td><td><code>{{ item['md5'] }}</code></td><td><code>{{ item['sha256'] }}</code></td><td>{{ item['malicious'] }}</td><td>{{ item['suspicious'] }}</td>{% else %}<td><code>{{ item }}</code></td><td>Unavailable</td><td>Unavailable</td><td>Unavailable</td><td>Unavailable</td>{% endif %}</tr>{% else %}<tr><td colspan="5" class="empty">No associated files returned.</td></tr>{% endfor %}</tbody></table></div>
-        </section>
-      </div>
+
+      <section class="formal-output reputation-output">
+        <div class="output-heading"><div><p class="eyebrow">SOURCES</p><h2>Sources used and status</h2></div><span>{{ report['results']|length }} sources</span></div>
+        <p class="used-engines">Sources used: {% for item in report['results'] %}{{ item['engine'] }}{{ ', ' if not loop.last }}{% else %}None{% endfor %}</p>
+        <div class="table-wrap"><table><thead><tr><th>Engine</th><th>State</th><th>Verdict</th><th>Result</th><th>Reference</th></tr></thead><tbody>
+          {% for item in report['results'] %}
+            <tr><td><strong>{{ item['engine'] }}</strong></td><td><span class="engine-state {{ item['state']|lower|replace(' ', '-') }}">{{ item['state'] }}</span></td><td><span class="url-verdict {{ item['verdict']|lower }}">{{ item['verdict'] }}</span></td><td>{{ item['summary'] }}</td><td>{% if item['reference'] %}<a class="text-button" href="{{ item['reference'] }}" target="_blank" rel="noopener noreferrer">Open result ↗</a>{% else %}<span class="self-label">Not available</span>{% endif %}</td></tr>
+          {% else %}
+            <tr><td colspan="5" class="empty">No source results available.</td></tr>
+          {% endfor %}
+        </tbody></table></div>
+      </section>
     </section>
 
-    <section class="formal-output reputation-output">
-      <div class="output-heading"><div><p class="eyebrow">ENGINE RESULTS</p><h2>Sources used and status</h2></div><span>{{ report['results']|length }} sources</span></div>
-      <p class="used-engines">Sources used: {% for item in report['results'] %}{{ item['engine'] }}{{ ', ' if not loop.last }}{% else %}None{% endfor %}</p>
-      <div class="table-wrap"><table><thead><tr><th>Engine</th><th>State</th><th>Verdict</th><th>Result</th><th>Reference</th></tr></thead><tbody>
-        {% for item in report['results'] %}
-          <tr><td><strong>{{ item['engine'] }}</strong></td><td><span class="engine-state {{ item['state']|lower|replace(' ', '-') }}">{{ item['state'] }}</span></td><td><span class="url-verdict {{ item['verdict']|lower }}">{{ item['verdict'] }}</span></td><td>{{ item['summary'] }}</td><td>{% if item['reference'] %}<a class="text-button" href="{{ item['reference'] }}" target="_blank" rel="noopener noreferrer">Open result ↗</a>{% else %}<span class="self-label">Not available</span>{% endif %}</td></tr>
-        {% else %}
-          <tr><td colspan="5" class="empty">No source results available.</td></tr>
-        {% endfor %}
-      </tbody></table></div>
+    <section id="rep-indicators" class="report-tab-panel" role="tabpanel" hidden>
+      <section class="formal-output association-output">
+        <div class="output-heading"><div><p class="eyebrow">RELATED INDICATORS</p><h2>Associated intelligence</h2></div><span>{{ indicator_total }} indicators</span></div>
+        <p class="association-description">Observed relationships returned by the selected sources. Dates are displayed in UTC.</p>
+        <div class="record-groups association-record-groups">
+          <section class="record-group">
+            <header><h3>SUBDOMAINS</h3><span>{{ associations.get('subdomains', [])|length }} answer{{ '' if associations.get('subdomains', [])|length == 1 else 's' }}</span></header>
+            <div class="table-wrap intelligence-table"><table><thead><tr><th>Subdomain</th><th>First observed</th><th>Last observed</th><th>Reputation</th><th>Malicious</th><th>Suspicious</th></tr></thead><tbody>{% for item in associations.get('subdomains', []) %}<tr><td><code>{{ item['value'] if item is mapping else item }}</code></td>{% if item is mapping %}<td>{{ item['first_seen'] }}</td><td>{{ item['last_seen'] }}</td><td><span class="url-verdict {{ item.get('reputation', 'Unknown')|lower }}">{{ item.get('reputation', 'Unknown') }}</span></td><td>{{ item['malicious'] }}</td><td>{{ item['suspicious'] }}</td>{% else %}<td>Unavailable</td><td>Unavailable</td><td><span class="url-verdict unknown">Unknown</span></td><td>Unavailable</td><td>Unavailable</td>{% endif %}</tr>{% else %}<tr><td colspan="6" class="empty">No associated subdomains returned.</td></tr>{% endfor %}</tbody></table></div>
+          </section>
+          <section class="record-group">
+            <header><h3>IP ADDRESSES</h3><span>{{ associations.get('ips', [])|length }} answer{{ '' if associations.get('ips', [])|length == 1 else 's' }}</span></header>
+            <div class="table-wrap intelligence-table"><table><thead><tr><th>IP address</th><th>First observed</th><th>Last observed</th><th>Reputation</th><th>Malicious</th><th>Suspicious</th></tr></thead><tbody>{% for item in associations.get('ips', []) %}<tr><td><code>{{ item['value'] if item is mapping else item }}</code></td>{% if item is mapping %}<td>{{ item['first_seen'] }}</td><td>{{ item['last_seen'] }}</td><td><span class="url-verdict {{ item['reputation']|lower }}">{{ item['reputation'] }}</span></td><td>{{ item['malicious'] }}</td><td>{{ item['suspicious'] }}</td>{% else %}<td>Unavailable</td><td>Unavailable</td><td>Unavailable</td><td>Unavailable</td><td>Unavailable</td>{% endif %}</tr>{% else %}<tr><td colspan="6" class="empty">No associated IPs returned.</td></tr>{% endfor %}</tbody></table></div>
+          </section>
+          <section class="record-group">
+            <header><h3>FILES</h3><span>{{ associations.get('files', [])|length }} answer{{ '' if associations.get('files', [])|length == 1 else 's' }}</span></header>
+            <div class="table-wrap intelligence-table"><table><thead><tr><th>File name</th><th>MD5</th><th>SHA-256</th><th>Malicious</th><th>Suspicious</th></tr></thead><tbody>{% for item in associations.get('files', []) %}<tr>{% if item is mapping %}<td><strong>{{ item['name'] }}</strong></td><td><code>{{ item['md5'] }}</code></td><td><code>{{ item['sha256'] }}</code></td><td>{{ item['malicious'] }}</td><td>{{ item['suspicious'] }}</td>{% else %}<td><code>{{ item }}</code></td><td>Unavailable</td><td>Unavailable</td><td>Unavailable</td><td>Unavailable</td>{% endif %}</tr>{% else %}<tr><td colspan="5" class="empty">No associated files returned.</td></tr>{% endfor %}</tbody></table></div>
+          </section>
+        </div>
+      </section>
     </section>
 
   {% endif %}
 </section>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-<script>
+<script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
+{% if location %}<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>{% endif %}
+<script nonce="{{ csp_nonce() }}">const tabs = document.querySelectorAll('[data-report-tab]');
   const vtFilter = document.querySelector('#vt-engine-filter');
   const applyVtFilter = () => {
     if (!vtFilter) return;
@@ -181,8 +210,38 @@
       }
     });
   };
-  renderVtChart();
-  new MutationObserver(renderVtChart).observe(document.body, { attributes: true, attributeFilter: ['data-theme'] });
-  if (document.querySelector('[data-task-status="Running"]')) setTimeout(() => location.reload(), 5000);
-</script>
+
+  let reputationMap;
+  const initReputationMap = () => {
+    const reputationMapNode = document.querySelector('#reputation-map');
+    if (!reputationMapNode || reputationMap || !window.L) return;
+    const reputationLat = Number(reputationMapNode.dataset.lat), reputationLng = Number(reputationMapNode.dataset.lng);
+    reputationMap = L.map(reputationMapNode).setView([reputationLat, reputationLng], 8);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 20 }).addTo(reputationMap);
+    const reputationPulse = L.divIcon({ className: 'pulse-marker', iconSize: [22, 22], iconAnchor: [11, 11] });
+    L.marker([reputationLat, reputationLng], { icon: reputationPulse }).addTo(reputationMap).bindPopup(reputationMapNode.dataset.label).openPopup();
+  };
+
+  let networkTabInited = false;
+  tabs.forEach(tab => tab.addEventListener('click', () => {
+    tabs.forEach(item => {
+      const active = item === tab;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-selected', String(active));
+      const panel = document.getElementById(item.dataset.reportTab);
+      if (panel) panel.hidden = !active;
+    });
+    if (tab.dataset.reportTab === 'rep-network') {
+      if (!networkTabInited) {
+        networkTabInited = true;
+        initReputationMap();
+        renderVtChart();
+      } else {
+        if (reputationMap) reputationMap.invalidateSize();
+        if (vtChart) vtChart.resize();
+      }
+    }
+  }));
+
+  new MutationObserver(() => { if (vtChart) renderVtChart(); }).observe(document.body, { attributes: true, attributeFilter: ['data-theme'] });</script>
 {% endblock %}

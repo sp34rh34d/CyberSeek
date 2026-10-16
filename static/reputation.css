@@ -195,30 +195,24 @@ body[data-theme="dark"] .task-view {
   .reputation-network-information {
     grid-template-columns: 1fr;
   }
-
   .reputation-chart-panel {
     border-top: 2px solid var(--edge);
     border-left: 0;
   }
-
   #reputation-map {
     height: 290px;
   }
-
   .reputation-network-information .eyebrow {
     grid-column: auto;
   }
-
   .reputation-network-information div,
   .reputation-network-information div:first-of-type {
     border-top: 1px solid var(--edge);
     border-left: 0;
   }
-
   .soc-assessment {
     display: grid;
   }
-
   .soc-details {
     grid-template-columns: 1fr;
   }

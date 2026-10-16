@@ -27,7 +27,8 @@ from werkzeug.utils import secure_filename
 
 from utils.analysis import is_private_host
 from utils.source_config import source_api_settings
-from utils.task_access import delete_owned_task, is_private_task, visible_task, visible_tasks
+from utils.uploads import protect_upload
+from utils.task_access import delete_owned_task, is_private_task, module_history, visible_task
 
 
 DEFAULT_EMAIL_TIMEZONE = "America/Tegucigalpa"
@@ -141,7 +142,7 @@ def _format_task_timestamp(value, timezone_name):
 
 
 def _extract_urls(text):
-    return list(dict.fromkeys(match.rstrip(".,;:!?)\]") for match in URL_PATTERN.findall(text or "")))[:MAX_REPUTATION_ITEMS]
+    return list(dict.fromkeys(match.rstrip(".,;:!?)\\]") for match in URL_PATTERN.findall(text or "")))[:MAX_REPUTATION_ITEMS]
 
 
 def _attachment_metadata(filename, content_type, data):
@@ -429,12 +430,13 @@ def register_eml_routes(app, database, db, current_user, login_required, upload_
                 task_id = str(uuid.uuid4())
                 stored = upload_dir / f"{task_id}_{filename}"
                 upload.save(stored)
+                protect_upload(stored)
                 db().execute("INSERT INTO eml_tasks (id, user_id, filename, stored_path, timezone, status, result, error, created_at, completed_at, is_private) VALUES (?, ?, ?, ?, ?, 'Running', NULL, NULL, ?, NULL, ?)", (task_id, current_user()["id"], filename, str(stored), timezone_name, datetime.now(timezone.utc).isoformat(), is_private_task(request.form)))
                 db().commit()
                 threading.Thread(target=worker, args=(task_id, str(stored), filename, timezone_name), daemon=True).start()
                 flash("Email analysis started. It will continue while you navigate the application.", "success")
                 return redirect(url_for("eml_analysis"))
-        return render_template("eml.html", tasks=visible_tasks(db(), "eml_tasks", current_user()["id"]), timezones=EMAIL_TIMEZONES)
+        return render_template("eml.html", history=module_history(db(), "eml", current_user()["id"], request.args), timezones=EMAIL_TIMEZONES)
 
     @app.get("/analysis/eml/<task_id>")
     @login_required

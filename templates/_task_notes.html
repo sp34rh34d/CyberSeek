@@ -1,0 +1,44 @@
+{# Rendered by base.html under every task report: observed indicators with pivots, and analyst notes. #}
+{% from '_macros.html' import timestamp with context %}
+{% if task_notes.indicators %}
+<section class="formal-output task-workspace" id="task-indicators">
+  <div class="output-heading"><div><p class="eyebrow">PIVOT</p><h2>Indicators observed in this task</h2></div><span>{{ task_notes.indicators|length }}</span></div>
+  <div class="table-wrap">
+    <table class="intelligence-table">
+      <thead><tr><th>Indicator</th><th>Type</th><th>Verdict</th><th>Investigate</th></tr></thead>
+      <tbody>
+      {% for item in task_notes.indicators %}
+      <tr>
+        <td><a href="{{ url_for('global_search', q=item.indicator_value) }}"><code>{{ item.indicator_value }}</code></a></td>
+        <td>{{ item.indicator_type }}</td>
+        <td><span class="url-verdict {{ item.verdict|lower }}">{{ item.verdict }}</span></td>
+        <td class="pivot-actions">{% for label, url in item.pivots %}<a class="text-button" href="{{ url }}">{{ label }}</a>{% endfor %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+<section class="formal-output task-workspace" id="analyst-notes">
+  <div class="output-heading"><div><p class="eyebrow">ANALYST NOTES</p><h2>Notes</h2></div><span>{{ task_notes.notes|length }}</span></div>
+  {% if task_notes.notes %}
+  <ol class="note-list">
+    {% for note in task_notes.notes %}
+    <li>
+      <header><strong>{{ 'You' if note['user_id'] == current_user()['id'] else note['author'] }}</strong><span>{{ timestamp(note['created_at']) }}</span>
+        {% if note['user_id'] == current_user()['id'] %}<form class="inline-form" method="post" action="{{ url_for('delete_task_note', module=task_notes.module, task_id=task_notes.task_id, note_id=note['id']) }}" data-confirm="Delete this note?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-button danger">Delete</button></form>{% endif %}
+      </header>
+      <p>{{ note['body'] }}</p>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="empty">No notes yet.<span class="empty-hint">Record context, decisions, or follow-ups for other analysts who can see this task.</span></p>
+  {% endif %}
+  <form class="note-form" method="post" action="{{ url_for('add_task_note', module=task_notes.module, task_id=task_notes.task_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Add a note<textarea name="body" rows="3" maxlength="4000" placeholder="e.g. Confirmed phishing kit; blocked at the proxy (ticket SOC-1234)." required></textarea></label>
+    <button class="primary">Save note</button>
+  </form>
+</section>

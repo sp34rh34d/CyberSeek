@@ -1,0 +1,75 @@
+{# Shared building blocks for task history pages and task reports. #}
+
+{% macro icon(key, size=16) -%}
+<svg viewBox="0 0 16 16" width="{{ size }}" height="{{ size }}" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">{{ module_icons[key]|safe }}</svg>
+{%- endmacro %}
+
+{% macro timestamp(value, empty='—') -%}
+{% if value %}<time datetime="{{ value }}" data-local-time title="{{ value[:19]|replace('T', ' ') }} UTC">{{ value[:16]|replace('T', ' ') }} UTC</time>{% else %}{{ empty }}{% endif %}
+{%- endmacro %}
+
+{% macro status_badge(status) -%}
+<span class="task-status {{ status|lower }}" data-task-status="{{ status }}"><i class="status-dot" aria-hidden="true"></i>{{ status }}</span>
+{%- endmacro %}
+
+{% macro pagination(history) -%}
+{% if history.pages > 1 %}
+<nav class="pagination" aria-label="Task history pages">
+  {% if history.page > 1 %}<a class="text-button" href="{{ url_with(page=history.page - 1) }}" rel="prev">← Previous</a>{% else %}<span class="text-button" aria-disabled="true">← Previous</span>{% endif %}
+  <span class="pagination-status">Page {{ history.page }} of {{ history.pages }} · {{ history.matching }} tasks</span>
+  {% if history.page < history.pages %}<a class="text-button" href="{{ url_with(page=history.page + 1) }}" rel="next">Next →</a>{% else %}<span class="text-button" aria-disabled="true">Next →</span>{% endif %}
+</nav>
+{% endif %}
+{%- endmacro %}
+
+{% macro task_history(history, module, placeholder='Target or owner', empty_text='No tasks yet.', empty_hint='Run a task above to see it here.') -%}
+{% set filters = history.filters %}
+<p class="section-label" id="task-history">Task history <span class="count-badge">{{ history.stats.total }}</span></p>
+<section class="history dns-history" data-history data-module="{{ module }}" data-status-url="{{ url_for('task_status', module=module) }}">
+  <div class="stat-row">
+    <a class="stat-card{{ ' is-selected' if not filters.status }}" href="{{ url_with(status=None, page=None) }}#task-history"><span class="stat-value">{{ history.stats.total }}</span><span class="stat-label">Total</span></a>
+    <a class="stat-card stat-info{{ ' is-selected' if filters.status == 'Running' }}" href="{{ url_with(status='Running', page=None) }}#task-history"><span class="stat-value" data-stat="active">{{ history.stats.active }}</span><span class="stat-label">Active</span></a>
+    <a class="stat-card stat-success{{ ' is-selected' if filters.status == 'Complete' }}" href="{{ url_with(status='Complete', page=None) }}#task-history"><span class="stat-value">{{ history.stats.complete }}</span><span class="stat-label">Complete</span></a>
+    <a class="stat-card stat-danger{{ ' is-selected' if filters.status == 'Failed' }}" href="{{ url_with(status='Failed', page=None) }}#task-history"><span class="stat-value">{{ history.stats.failed }}</span><span class="stat-label">Failed</span></a>
+  </div>
+  <form class="history-filters" method="get" action="#task-history" data-history-filters>
+    <label>Search<input type="search" name="q" value="{{ filters.q }}" placeholder="{{ placeholder }}"></label>
+    <label>Status<select name="status"><option value="">Any status</option>{% for status in ('Running', 'Queued', 'Complete', 'Failed', 'Paused') %}<option value="{{ status }}" {{ 'selected' if filters.status == status }}>{{ status }}</option>{% endfor %}</select></label>
+    <label>Owner<select name="owner"><option value="">Everyone</option><option value="mine" {{ 'selected' if filters.owner }}>Only mine</option></select></label>
+    <label>Date<input type="date" name="date" value="{{ filters.date }}"></label>
+    <button class="text-button" type="submit" data-filter-apply>Apply</button>
+    {% if history.filtered %}<a class="text-button" href="{{ request.path }}#task-history">Clear</a>{% endif %}
+  </form>
+  <div class="task-grid">
+    {% for task in history['items'] %}{{ caller(task) }}{% else %}
+    <p class="empty">{% if history.filtered %}No tasks match these filters.<span class="empty-hint"><a href="{{ request.path }}#task-history">Clear the filters</a> to see every task.</span>{% else %}{{ empty_text }}<span class="empty-hint">{{ empty_hint }}</span>{% endif %}</p>
+    {% endfor %}
+  </div>
+  {{ pagination(history) }}
+</section>
+{%- endmacro %}
+
+{% macro task_card(task, module, title, export_endpoint=None, delete_endpoint=None, subtitle=None, actions=None, show_started=True) -%}
+{% set owned = task['user_id'] == current_user()['id'] %}
+<article class="task-card" data-task-row data-task-id="{{ task['id'] }}">
+  <header class="task-card-head">
+    <div class="task-card-title"><span class="task-card-title-part"><a class="task-card-link" href="{{ url_for(modules[module].view, task_id=task['id']) }}"><strong>{{ title }}</strong></a>{% if subtitle %}<span class="task-owner">{{ subtitle }}</span>{% endif %}</span></div>
+    {{ status_badge(task['status']) }}
+  </header>
+  <dl class="task-card-facts">
+    {{ caller() if caller }}
+    <div><dt>Owner</dt><dd><span class="task-owner">{{ 'You' if owned else task['owner_name'] }}</span></dd></div>
+    <div><dt>Visibility</dt><dd><span class="task-visibility {{ 'private' if task['is_private'] else 'shared' }}">{{ 'Private' if task['is_private'] else 'Shared' }}</span></dd></div>
+    {% if show_started %}<div><dt>Started</dt><dd>{{ timestamp(task['created_at']) }}</dd></div>{% endif %}
+  </dl>
+  {% if task['status'] in ('Failed', 'Error') and task['error'] %}<p class="task-card-error" title="{{ task['error'] }}">{{ task['error']|truncate(140) }}</p>{% endif %}
+  <footer class="task-card-actions">
+    <a class="text-button" href="{{ url_for(modules[module].view, task_id=task['id']) }}">View</a>
+    {% if actions %}{{ actions }}{% else %}
+    {% if export_endpoint and task['status'] not in ('Running', 'Queued') %}<details class="task-export"><summary>Export</summary><a href="{{ url_for(export_endpoint, task_id=task['id'], export_format='json') }}">JSON</a><a href="{{ url_for(export_endpoint, task_id=task['id'], export_format='html') }}">HTML</a></details>{% endif %}
+    {% set rerun = rerun_args(module, task) %}{% if rerun %}<a class="text-button" href="{{ url_for(modules[module].list, **rerun) }}" title="Open the form pre-filled with this task's input">Run again</a>{% endif %}
+    {% if owned and delete_endpoint %}<form class="inline-form" action="{{ url_for(delete_endpoint, task_id=task['id']) }}" method="post" data-confirm="Delete this task? This cannot be undone."><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-button danger">Delete</button></form>{% endif %}
+    {% endif %}
+  </footer>
+</article>
+{%- endmacro %}

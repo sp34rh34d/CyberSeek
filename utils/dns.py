@@ -13,7 +13,7 @@ import dns.exception
 import dns.resolver
 from flask import Response, flash, jsonify, make_response, redirect, render_template, request, url_for
 
-from utils.task_access import delete_owned_task, is_private_task, visible_task, visible_tasks
+from utils.task_access import delete_owned_task, is_private_task, module_history, visible_task
 
 
 ALLOWED_RECORD_TYPES = {"A", "AAAA", "TXT", "NS", "CNAME", "PTR", "MX", "SOA", "DS", "ALL"}
@@ -152,8 +152,12 @@ def register_dns_routes(app, database, db, current_user, login_required):
                 threading.Thread(target=run_dns_task, args=(database, task_id, domain, record_type), daemon=True).start()
                 flash("DNS task started. It will continue while you navigate the application.", "success")
                 return redirect(url_for("dns_queries"))
-        tasks = visible_tasks(db(), "dns_tasks", current_user()["id"])
-        return render_template("dns.html", tasks=tasks)
+        requested_type = request.args.get("record_type", "A").upper() if request.method == "GET" else "A"
+        return render_template(
+            "dns.html", history=module_history(db(), "dns", current_user()["id"], request.args),
+            requested_domain=request.args.get("domain", "").strip() if request.method == "GET" else "",
+            requested_record_type=requested_type if requested_type in ALLOWED_RECORD_TYPES else "A",
+        )
 
     @app.route("/recon/dns/<task_id>")
     @login_required

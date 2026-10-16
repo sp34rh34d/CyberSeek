@@ -1,22 +1,18 @@
 {% extends 'base.html' %}
+{% from '_macros.html' import task_history, task_card with context %}
 {% block title %}DNS query · Cyberseek{% endblock %}
 {% block content %}
+<div class="page-intro"><p class="eyebrow">RECONNAISSANCE</p><h1>DNS query</h1><p class="page-lead">Resolve a domain or IP against public DNS records — A, AAAA, TXT, NS, CNAME, PTR, MX, SOA, DS, or all of them.</p></div>
+<p class="section-label">New DNS query</p>
 <section class="recon-panel">
   <form method="post" class="dns-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label>Domain or IP<input name="domain" placeholder="example.com" required autofocus></label>
-    <fieldset><legend>Record type</legend><div class="record-radios">{% for type in ['A','AAAA','TXT','NS','CNAME','PTR','MX','SOA','DS','ALL'] %}<label><input type="radio" name="record_type" value="{{ type }}" {% if type == 'A' %}checked{% endif %}><span>{{ type }}</span></label>{% endfor %}</div></fieldset>
+    <label class="field-primary">Domain or IP<span class="field-input-wrap"><svg class="field-icon" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="3" r="1.6"/><circle cx="3" cy="13" r="1.6"/><circle cx="13" cy="13" r="1.6"/><path d="M8 4.6V9M8 9 3.7 11.7M8 9l4.3 2.7"/></svg><input name="domain" value="{{ requested_domain }}" placeholder="example.com" required autofocus></span></label>
+    <p class="form-section-label">Query options</p><fieldset><legend>Record type</legend><div class="record-radios">{% for type in ['A','AAAA','TXT','NS','CNAME','PTR','MX','SOA','DS','ALL'] %}<label><input type="radio" name="record_type" value="{{ type }}" {% if type == requested_record_type %}checked{% endif %}><span>{{ type }}</span></label>{% endfor %}</div></fieldset>
     <label class="task-privacy"><input type="checkbox" name="is_private" value="1"><span>Keep this task private</span></label>
-    <button class="primary">Run query </button>
+    <button class="primary">Run query</button>
   </form>
 </section>
-<section class="history dns-history">
-  <div class="history-filters" data-task-filters><label>Filter by name<input type="search" data-task-name-filter placeholder="Target or owner"></label><label>Date<input type="date" data-task-date-filter></label></div>
-  <div class="table-wrap"><table><thead><tr><th>Target</th><th>Type</th><th>Owner</th><th>Visibility</th><th>Status</th><th>Started</th><th>Actions</th></tr></thead><tbody>
-    {% for task in tasks %}
-      <tr data-task-row data-task-name="{{ task['domain']|lower }} {{ task['owner_name']|lower }}" data-task-date="{{ task['created_at'][:10] }}"><td><strong>{{ task['domain'] }}</strong></td><td>{{ task['record_type'] }}</td><td><span class="task-owner">{{ 'You' if task['user_id'] == current_user()['id'] else task['owner_name'] }}</span></td><td><span class="task-visibility {{ 'private' if task['is_private'] else 'shared' }}">{{ 'Private' if task['is_private'] else 'Shared' }}</span></td><td><span class="task-status {{ task['status']|lower }}" data-task-status="{{ task['status'] }}">{{ task['status'] }}</span></td><td>{{ task['created_at'][11:19] }} UTC</td><td class="actions"><a class="text-button" href="{{ url_for('view_dns_task', task_id=task['id']) }}">View</a><details class="task-export"><summary>Export</summary><a href="{{ url_for('export_dns_task', task_id=task['id'], export_format='json') }}">JSON</a><a href="{{ url_for('export_dns_task', task_id=task['id'], export_format='html') }}">HTML</a></details>{% if task['user_id'] == current_user()['id'] %}<form class="inline-form" action="{{ url_for('delete_dns_task', task_id=task['id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-button danger">Delete</button></form>{% endif %}</td></tr>
-    {% else %}<tr><td colspan="7" class="empty">No DNS tasks yet.</td></tr>{% endfor %}
-  </tbody></table></div>
-</section>
-<script>const f=document.querySelector('[data-task-filters]'),n=f?.querySelector('[data-task-name-filter]'),d=f?.querySelector('[data-task-date-filter]'),filterTasks=()=>document.querySelectorAll('[data-task-row]').forEach(r=>r.hidden=!!((n?.value.trim().toLowerCase()&&!r.dataset.taskName.includes(n.value.trim().toLowerCase()))||(d?.value&&r.dataset.taskDate!==d.value)));n?.addEventListener('input',filterTasks);d?.addEventListener('change',filterTasks);if(document.querySelector('[data-task-status="Running"]'))setTimeout(()=>location.reload(),5000)</script>
+{% call(task) task_history(history, 'dns', placeholder='Target or owner', empty_text='No DNS tasks yet.', empty_hint='Run a query above to see it here.') %}{% call task_card(task, 'dns', task['domain'], 'export_dns_task', 'delete_dns_task') %}<div><dt>Type</dt><dd>{{ task['record_type'] }}</dd></div>{% endcall %}{% endcall %}
+
 {% endblock %}

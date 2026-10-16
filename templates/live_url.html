@@ -1,18 +1,18 @@
 {% extends 'base.html' %}
+{% from '_macros.html' import task_history, task_card with context %}
 {% block title %}Live URL Analysis · Cyberseek{% endblock %}
 {% block content %}
+<div class="page-intro"><p class="eyebrow">ANALYSIS</p><h1>Live URL analysis</h1><p class="page-lead">Render a public URL in a disposable browser to capture its behavior, resources, screenshot, and security posture.</p></div>
+<p class="section-label">New URL analysis</p>
 <section class="recon-panel live-url-panel">
   <form method="post" class="live-url-form">
-    <label>Public URL<input name="target" type="url" value="{{ requested_target|default('', true) }}" placeholder="https://example.com/path" required autofocus></label>
-    <label class="user-agent-choice">Browser user agent<select name="user_agent">{% for key, profile in user_agents.items() %}<option value="{{ key }}" {% if key == 'firefox' %}selected{% endif %}>{{ profile['label'] }}</option>{% endfor %}</select></label>
+    <label class="field-primary">Public URL<span class="field-input-wrap"><svg class="field-icon" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6.2"/><path d="M1.8 8h12.4M8 1.8c1.7 1.7 2.6 4 2.6 6.2s-.9 4.5-2.6 6.2c-1.7-1.7-2.6-4-2.6-6.2s.9-4.5 2.6-6.2Z"/></svg><input name="target" type="url" value="{{ requested_target|default('', true) }}" placeholder="https://example.com/path" required autofocus></span></label>
+    <p class="form-section-label">Options</p><label class="user-agent-choice">Browser user agent<select name="user_agent">{% for key, profile in user_agents.items() %}<option value="{{ key }}" {% if key == 'firefox' %}selected{% endif %}>{{ profile['label'] }}</option>{% endfor %}</select></label>
     <p class="external-notice">HTTP Document Inspector extracts declared resources and interaction points. The optional open-source Playwright Chromium engine renders the page, records browser activity, and captures a screenshot. Private, local, and non-public destinations are blocked.</p>
     <label class="task-privacy"><input type="checkbox" name="is_private" value="1"><span>Keep this task private</span></label>
-    <button class="primary">Run live URL analysis </button>
+    <button class="primary">Run live URL analysis</button>
   </form>
 </section>
-<section class="history dns-history">
-  <div class="history-filters" data-task-filters><label>Filter by name<input type="search" data-task-name-filter placeholder="URL or owner"></label><label>Date<input type="date" data-task-date-filter></label></div>
-  <div class="table-wrap"><table><thead><tr><th>URL</th><th>User agent</th><th>Owner</th><th>Visibility</th><th>Status</th><th>Started</th><th>Actions</th></tr></thead><tbody>{% for task in tasks %}<tr data-task-row data-task-name="{{ task['target']|lower }} {{ task['owner_name']|lower }}" data-task-date="{{ task['created_at'][:10] }}"><td class="reputation-cell"><strong>{{ task['target'] }}</strong></td><td>{{ task['user_agent']|default('firefox', true)|title }}</td><td><span class="task-owner">{{ 'You' if task['user_id'] == current_user()['id'] else task['owner_name'] }}</span></td><td><span class="task-visibility {{ 'private' if task['is_private'] else 'shared' }}">{{ 'Private' if task['is_private'] else 'Shared' }}</span></td><td><span class="task-status {{ task['status']|lower }}" data-task-status="{{ task['status'] }}">{{ task['status'] }}</span></td><td>{{ task['created_at'][11:19] }} UTC</td><td class="actions"><a class="text-button" href="{{ url_for('view_live_url_analysis', task_id=task['id']) }}">View</a><details class="task-export"><summary>Export</summary><a href="{{ url_for('export_live_url_analysis', task_id=task['id'], export_format='json') }}">JSON</a><a href="{{ url_for('export_live_url_analysis', task_id=task['id'], export_format='html') }}">HTML</a></details>{% if task['user_id'] == current_user()['id'] %}<form class="inline-form" action="{{ url_for('delete_live_url_analysis', task_id=task['id']) }}" method="post"><button class="text-button danger">Delete</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="7" class="empty">No live URL analyses yet.</td></tr>{% endfor %}</tbody></table></div>
-</section>
-<script>const f=document.querySelector('[data-task-filters]'),n=f?.querySelector('[data-task-name-filter]'),d=f?.querySelector('[data-task-date-filter]'),filterTasks=()=>document.querySelectorAll('[data-task-row]').forEach(r=>r.hidden=!!((n?.value.trim().toLowerCase()&&!r.dataset.taskName.includes(n.value.trim().toLowerCase()))||(d?.value&&r.dataset.taskDate!==d.value)));n?.addEventListener('input',filterTasks);d?.addEventListener('change',filterTasks);if(document.querySelector('[data-task-status="Running"]'))setTimeout(()=>location.reload(),5000)</script>
+{% call(task) task_history(history, 'live_url', placeholder='URL or owner', empty_text='No live URL analyses yet.', empty_hint='Analyze a URL above to see it here.') %}{% call task_card(task, 'live_url', task['target'], 'export_live_url_analysis', 'delete_live_url_analysis') %}<div><dt>User agent</dt><dd>{{ task['user_agent']|default('firefox', true)|title }}</dd></div>{% endcall %}{% endcall %}
+
 {% endblock %}

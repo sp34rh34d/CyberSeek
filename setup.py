@@ -176,7 +176,8 @@ class ServiceCommand(Command):
                 "SESSION_COOKIE_SECURE = False\n"
                 "SESSION_COOKIE_HTTPONLY = False\n"
                 "SESSION_COOKIE_SAMESITE = Lax\n"
-                "WTF_CSRF_SSL_STRICT = False\n",
+                "WTF_CSRF_SSL_STRICT = False\n"
+                "UPLOAD_RETENTION_DAYS = 0\n",
                 encoding="utf-8",
             )
 

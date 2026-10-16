@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 from flask import flash, jsonify, make_response, redirect, render_template, request, url_for
 
 from utils.dns import geolocate_result, resolves_to_non_public_ip, valid_dns_target
-from utils.task_access import delete_owned_task, is_private_task, visible_task, visible_tasks
+from utils.task_access import delete_owned_task, is_private_task, module_history, visible_task
 
 
 class RdapNotFoundError(RuntimeError):
@@ -199,8 +199,10 @@ def register_whois_routes(app, database, db, current_user, login_required):
                 threading.Thread(target=run_whois_task, args=(database, task_id, target), daemon=True).start()
                 flash("WHOIS task started. It will continue while you navigate the application.", "success")
                 return redirect(url_for("whois_lookup"))
-        tasks = visible_tasks(db(), "whois_tasks", current_user()["id"])
-        return render_template("whois.html", tasks=tasks)
+        return render_template(
+            "whois.html", history=module_history(db(), "whois", current_user()["id"], request.args),
+            requested_target=request.args.get("target", "").strip() if request.method == "GET" else "",
+        )
 
     @app.route("/recon/whois/<task_id>")
     @login_required

@@ -22,12 +22,17 @@ from werkzeug.utils import secure_filename
 from utils.soc_summary import create_file_action_threat_indicators, create_file_sandbox_summary
 from utils.local_heuristics import ingest_local_intelligence
 from utils.source_config import source_api_settings
-from utils.task_access import delete_owned_task, is_private_task, visible_task, visible_tasks
+from utils.service_config import service_settings
+from utils.uploads import protect_upload
+from utils.task_access import delete_owned_task, is_private_task, module_history, visible_task
 
 
 MAX_STATIC_BYTES = 16 * 1024 * 1024
 MAX_DYNAMIC_UPLOAD_BYTES = 100 * 1024 * 1024
-MAX_DYNAMIC_POLL_ATTEMPTS = 24
+DYNAMIC_POLL_INTERVAL = 5
+# Fresh sandbox detonations (especially Office documents) routinely take several
+# minutes; the window is configurable via [service] DYNAMIC_SANDBOX_MINUTES.
+MAX_DYNAMIC_POLL_ATTEMPTS = max(12, service_settings().get("DYNAMIC_SANDBOX_MINUTES", 10) * 60 // DYNAMIC_POLL_INTERVAL)
 MAX_IOCS = 40
 URL_PATTERN = re.compile(r"https?://[^\s\"'<>]{3,2048}", re.IGNORECASE)
 DOMAIN_PATTERN = re.compile(r"(?<![\w.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?![\w.-])", re.IGNORECASE)
@@ -650,7 +655,7 @@ def _dynamic_result(provider, payload, state="Complete", detail=None, static_ass
     verdict = _provider_dynamic_verdict(payload)
     actions = _dynamic_actions(payload)
     network_requests = _dynamic_network(payload)
-    return {
+    result = {
         "provider": PROVIDER_ENGINES[provider], "provider_key": provider, "state": state,
         "verdict": verdict, "detail": detail or f"Dynamic sandbox result from {PROVIDER_ENGINES[provider]}.",
         "submission_id": _submission_id(payload), "fields": _dynamic_fields(payload),
@@ -659,9 +664,19 @@ def _dynamic_result(provider, payload, state="Complete", detail=None, static_ass
         "threat_indicators": _dynamic_threat_indicators(verdict, actions),
         "static_assessment": static_assessment or {},
         "ai_static_verdict": (static_assessment or {}).get("verdict", "Unknown"),
-        "ai_summary": create_file_sandbox_summary(static_assessment, verdict, actions) if state == "Complete" else {},
-        "ai_threat_indicators": create_file_action_threat_indicators(actions, verdict, static_assessment) if state == "Complete" else [],
     }
+    if state == "Complete":
+        # Two back-to-back Gemini calls (vs. reputation lookup's one) double the odds of
+        # landing in the same brief provider-side overload window. A short stagger between
+        # them doesn't fix an external outage, but it does reduce the chance both calls hit
+        # the exact same bad moment.
+        result["ai_summary"] = create_file_sandbox_summary(static_assessment, verdict, actions)
+        time.sleep(1.5)
+        result["ai_threat_indicators"] = create_file_action_threat_indicators(actions, verdict, static_assessment)
+    else:
+        result["ai_summary"] = {}
+        result["ai_threat_indicators"] = []
+    return result
 
 
 def _dynamic_retry(dynamic, detail):
@@ -680,6 +695,20 @@ def _stored_dynamic_is_pending(dynamic):
     if _provider_state_is_pending(dynamic.get("state")):
         return True
     return any(field.get("label", "").lower() in {"state", "status"} and _provider_state_is_pending(field.get("value")) for field in dynamic.get("fields", []))
+
+
+def _dynamic_timed_out(dynamic):
+    """A dynamic scan whose polling window expired while the sandbox was still working.
+
+    Distinct from a genuinely unavailable result (not configured, provider error): the
+    sample was accepted and has a submission id, so re-opening the task can pick up the
+    now-ready report instead of leaving it stuck as failed.
+    """
+    if str(dynamic.get("state") or "").strip().lower() != "unavailable":
+        return False
+    detail = str(dynamic.get("detail") or "").lower()
+    timed_out = any(marker in detail for marker in ("did not complete", "did not finish", "polling stopped"))
+    return timed_out and bool(dynamic.get("submission_id") or dynamic.get("sample_sha256") or dynamic.get("provider_key") == "hybrid_analysis")
 
 
 def _dynamic_submission_file(path, filename, file_password):
@@ -817,7 +846,7 @@ def _refresh_dynamic_sandbox(dynamic):
         if pending:
             attempts = int(dynamic.get("poll_attempts") or 0) + 1
             if attempts >= MAX_DYNAMIC_POLL_ATTEMPTS:
-                return {**result, "state": "Unavailable", "poll_attempts": attempts, "detail": f"{PROVIDER_ENGINES[provider]} did not complete after {MAX_DYNAMIC_POLL_ATTEMPTS} polling attempts."}
+                return {**result, "state": "Unavailable", "poll_attempts": attempts, "detail": f"{PROVIDER_ENGINES[provider]} did not complete within the polling window. Reopen this task to resume polling."}
             result["poll_attempts"] = attempts
         return result
     except HTTPError as exc:
@@ -906,7 +935,7 @@ def register_file_scan_routes(app, database, db, current_user, login_required, u
             active_dynamic_polls.add(task_id)
         try:
             for _ in range(MAX_DYNAMIC_POLL_ATTEMPTS):
-                time.sleep(5)
+                time.sleep(DYNAMIC_POLL_INTERVAL)
                 with sqlite3.connect(database) as connection:
                     row = connection.execute("SELECT result FROM file_scan_tasks WHERE id = ? AND status = 'Running'", (task_id,)).fetchone()
                     if not row or not row[0]:
@@ -943,7 +972,7 @@ def register_file_scan_routes(app, database, db, current_user, login_required, u
                 if report["dynamic"]["state"] == "Queued":
                     persist("Running", report)
                     for _ in range(MAX_DYNAMIC_POLL_ATTEMPTS):
-                        time.sleep(5)
+                        time.sleep(DYNAMIC_POLL_INTERVAL)
                         report["dynamic"] = _refresh_dynamic_sandbox(report["dynamic"])
                         if report["dynamic"]["state"] == "Queued":
                             persist("Running", report)
@@ -951,7 +980,7 @@ def register_file_scan_routes(app, database, db, current_user, login_required, u
                         status = "Failed" if report["dynamic"]["state"] in {"Unavailable", "Not configured"} else "Complete"
                         persist(status, report)
                         return
-                    report["dynamic"] = {**report["dynamic"], "state": "Unavailable", "detail": f"The provider did not finish within {MAX_DYNAMIC_POLL_ATTEMPTS} polling attempts."}
+                    report["dynamic"] = {**report["dynamic"], "state": "Unavailable", "detail": f"The provider did not finish within {MAX_DYNAMIC_POLL_ATTEMPTS * DYNAMIC_POLL_INTERVAL // 60} minutes. Reopen this task to resume polling."}
                     persist("Failed", report)
                     return
                 status = "Failed" if report["dynamic"]["state"] in {"Unavailable", "Not configured"} else "Complete"
@@ -991,12 +1020,13 @@ def register_file_scan_routes(app, database, db, current_user, login_required, u
                 task_id = str(uuid.uuid4())
                 stored = upload_dir / f"{task_id}_{filename}"
                 upload.save(stored)
+                protect_upload(stored)
                 db().execute("INSERT INTO file_scan_tasks (id, user_id, filename, stored_path, engine, analysis_mode, status, result, error, created_at, completed_at, is_private) VALUES (?, ?, ?, ?, ?, ?, 'Running', NULL, NULL, ?, NULL, ?)", (task_id, current_user()["id"], filename, str(stored), provider, analysis_mode, datetime.now(timezone.utc).isoformat(), is_private_task(request.form)))
                 db().commit()
                 threading.Thread(target=worker, args=(task_id, str(stored), filename, provider, analysis_mode, file_password), daemon=True).start()
                 flash("File analysis started. The local inspector never executes the file.", "success")
                 return redirect(url_for("file_scan"))
-        return render_template("file_scan.html", tasks=visible_tasks(db(), "file_scan_tasks", current_user()["id"]), engines=FILE_ENGINES, providers=PROVIDER_ENGINES, password_required=request.args.get("password_required") == "1")
+        return render_template("file_scan.html", history=module_history(db(), "file_scan", current_user()["id"], request.args), engines=FILE_ENGINES, providers=PROVIDER_ENGINES, password_required=request.args.get("password_required") == "1")
 
     @app.get("/analysis/file/<task_id>")
     @login_required
@@ -1024,8 +1054,9 @@ def register_file_scan_routes(app, database, db, current_user, login_required, u
             report["hash_reputation"] = {"state": "Complete", "verdict": "Unknown", "detail": "VirusTotal has no prior record for this file hash.", "malicious": 0, "suspicious": 0, "clean": 0, "engines": []}
             db().execute("UPDATE file_scan_tasks SET result = ? WHERE id = ?", (json.dumps(report), task_id))
             db().commit()
-        if report and report.get("dynamic") and task["status"] != "Running" and _stored_dynamic_is_pending(report["dynamic"]):
+        if report and report.get("dynamic") and task["status"] != "Running" and (_stored_dynamic_is_pending(report["dynamic"]) or _dynamic_timed_out(report["dynamic"])):
             report["dynamic"]["state"] = "Queued"
+            report["dynamic"]["poll_attempts"] = 0
             report["dynamic"]["detail"] = f"{report['dynamic'].get('provider', 'The provider')} is still processing the submitted file. Polling resumed."
             db().execute("UPDATE file_scan_tasks SET status = 'Running', result = ?, completed_at = NULL WHERE id = ?", (json.dumps(report), task_id))
             db().commit()
@@ -1043,11 +1074,12 @@ def register_file_scan_routes(app, database, db, current_user, login_required, u
             static_assessment = report["dynamic"].get("static_assessment") or _static_triage_assessment(report)
             report["dynamic"]["static_assessment"] = static_assessment
             if "ai_threat_indicators" not in report["dynamic"] or "ai_summary" not in report["dynamic"] or report["dynamic"].get("ai_summary", {}).get("style") != "soc-narrative-v2" or "recommendations" not in report["dynamic"].get("ai_summary", {}) or actions_changed or report["dynamic"].get("ai_static_verdict") != static_assessment.get("verdict", "Unknown"):
-                report["dynamic"]["ai_threat_indicators"] = create_file_action_threat_indicators(
-                    actions, report["dynamic"].get("verdict", "Unknown"), static_assessment
-                )
                 report["dynamic"]["ai_summary"] = create_file_sandbox_summary(
                     static_assessment, report["dynamic"].get("verdict", "Unknown"), actions
+                )
+                time.sleep(1.5)
+                report["dynamic"]["ai_threat_indicators"] = create_file_action_threat_indicators(
+                    actions, report["dynamic"].get("verdict", "Unknown"), static_assessment
                 )
                 report["dynamic"]["ai_static_verdict"] = static_assessment.get("verdict", "Unknown")
                 db().execute("UPDATE file_scan_tasks SET result = ? WHERE id = ?", (json.dumps(report), task_id))

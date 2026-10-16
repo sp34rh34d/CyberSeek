@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import icon, status_badge, timestamp with context %}
+{% block title %}{{ query ~ ' · ' if query }}Search · Cyberseek{% endblock %}
+{% block content %}
+<div class="page-intro"><p class="eyebrow">WORKSPACE</p><h1>Search</h1><p class="page-lead">Find a domain, IP, URL, hash, email, or file name across every task and the local indicator store. Private tasks of other analysts are never included.</p></div>
+
+<section class="recon-panel">
+  <form class="whois-form" action="{{ url_for('global_search') }}" method="get" role="search">
+    <label class="field-primary">Indicator or text<span class="field-input-wrap">{{ icon('reputation') }}<input name="q" value="{{ query }}" placeholder="example.com, 8.8.8.8, https://…, sha256, user@example.com" required autofocus></span></label>
+    <button class="primary">Search</button>
+  </form>
+</section>
+
+{% if query %}
+  {% if indicator %}
+  <section class="formal-output search-indicator">
+    <div class="output-heading"><div><p class="eyebrow">{{ indicator.type|upper }}</p><h2><code>{{ indicator.value }}</code></h2></div></div>
+    <p class="page-lead">Run a new task for this indicator:</p>
+    <div class="pivot-actions">{% for label, url in indicator.pivots %}<a class="text-button" href="{{ url }}">{{ label }} →</a>{% endfor %}</div>
+  </section>
+  {% endif %}
+
+  <p class="section-label">Indicators in local intelligence <span class="count-badge">{{ indicators|length }}</span></p>
+  {% if indicators %}
+  <section class="history table-wrap">
+    <table class="intelligence-table">
+      <thead><tr><th>Indicator</th><th>Type</th><th>Verdict</th><th>Seen in</th><th>Last seen</th><th>Pivot</th></tr></thead>
+      <tbody>
+      {% for item in indicators %}
+      <tr>
+        <td><code>{{ item.indicator_value }}</code></td>
+        <td>{{ item.indicator_type }}</td>
+        <td><span class="url-verdict {{ item.verdict|lower }}">{{ item.verdict }}</span></td>
+        <td>{% for task in item.tasks %}<a href="{{ task.url }}">{{ task.label }}</a>{{ ', ' if not loop.last }}{% endfor %}</td>
+        <td>{{ timestamp(item.last_seen) }}</td>
+        <td class="pivot-actions">{% for label, url in item.pivots %}<a class="text-button" href="{{ url }}">{{ label }}</a>{% endfor %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% else %}
+  <p class="empty">No stored indicator matches “{{ query }}”.</p>
+  {% endif %}
+
+  <p class="section-label">Tasks <span class="count-badge">{{ task_groups|sum(attribute='total') }}</span></p>
+  {% for group in task_groups %}
+  <section class="formal-output search-group">
+    <div class="output-heading"><div><p class="eyebrow">{{ group.label|upper }}</p><h2>{{ group.total }} match{{ 'es' if group.total != 1 }}</h2></div>{% if group.total > group.rows|length %}<a class="text-button" href="{{ group.more_url }}">See all →</a>{% endif %}</div>
+    <ol class="overview-list">
+      {% for task in group.rows %}
+      <li>
+        <span class="overview-module">{{ icon(group.key) }}</span>
+        <a class="overview-title" href="{{ url_for(modules[group.key].view, task_id=task['id']) }}">{{ task[group.title] }}</a>
+        <span class="overview-meta">{{ 'You' if task['user_id'] == current_user()['id'] else task['owner_name'] }} · {{ timestamp(task['created_at']) }}</span>
+        {{ status_badge(task['status']) }}
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+  {% else %}
+  <p class="empty">No task matches “{{ query }}”.<span class="empty-hint">Use the pivots above to start one.</span></p>
+  {% endfor %}
+{% endif %}
+{% endblock %}

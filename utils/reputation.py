@@ -19,7 +19,7 @@ from utils.local_heuristics import ingest_local_intelligence
 from utils.dns import geolocate_result
 from utils.source_config import source_api_settings
 from utils.soc_summary import create_soc_summary
-from utils.task_access import delete_owned_task, is_private_task, visible_task, visible_tasks
+from utils.task_access import delete_owned_task, is_private_task, module_history, visible_task
 
 
 ENGINES = {
@@ -560,9 +560,8 @@ def register_reputation_routes(app, database, db, current_user, login_required):
                 threading.Thread(target=run_reputation_task, args=(database, task_id, target, engine), daemon=True).start()
                 flash("Reputation lookup started. Selected external providers will receive this indicator.", "success")
                 return redirect(url_for("reputation_lookup"))
-        tasks = visible_tasks(db(), "reputation_tasks", current_user()["id"])
         requested_target = request.args.get("target", "").strip() if request.method == "GET" else ""
-        return render_template("reputation.html", tasks=tasks, engines=ENGINES, requested_target=requested_target)
+        return render_template("reputation.html", history=module_history(db(), "reputation", current_user()["id"], request.args), engines=ENGINES, requested_target=requested_target)
 
     @app.route("/analysis/url/<task_id>")
     @app.route("/analysis/reputation/<task_id>")

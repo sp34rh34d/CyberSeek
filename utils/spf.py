@@ -10,7 +10,7 @@ import dns.resolver
 from flask import flash, jsonify, make_response, redirect, render_template, request, url_for
 
 from utils.dns import resolves_to_non_public_ip, valid_dns_target
-from utils.task_access import delete_owned_task, is_private_task, visible_task, visible_tasks
+from utils.task_access import delete_owned_task, is_private_task, module_history, visible_task
 
 
 QUALIFIER_RESULTS = {"+": "pass", "-": "fail", "~": "softfail", "?": "neutral"}
@@ -435,8 +435,7 @@ def register_spf_routes(app, database, db, current_user, login_required):
                 threading.Thread(target=run_spf_task, args=(database, task_id, domain, sender_ip or None), daemon=True).start()
                 flash("SPF task started. It will continue while you navigate the application.", "success")
                 return redirect(url_for("spf_check"))
-        tasks = visible_tasks(db(), "spf_tasks", current_user()["id"])
-        return render_template("spf.html", tasks=tasks, requested_domain=request.args.get("domain", "").strip().lower().rstrip("."), requested_sender_ip=request.args.get("sender_ip", "").strip())
+        return render_template("spf.html", history=module_history(db(), "spf", current_user()["id"], request.args), requested_domain=request.args.get("domain", "").strip().lower().rstrip("."), requested_sender_ip=request.args.get("sender_ip", "").strip())
 
     @app.route("/recon/spf/<task_id>")
     @login_required

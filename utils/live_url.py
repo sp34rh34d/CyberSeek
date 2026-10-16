@@ -21,7 +21,7 @@ from utils.local_heuristics import ingest_local_intelligence
 from utils.dns import geolocate_result
 from utils.source_config import source_api_settings
 from utils.soc_summary import create_live_url_ai_verdict
-from utils.task_access import delete_owned_task, is_private_task, visible_task, visible_tasks
+from utils.task_access import delete_owned_task, is_private_task, module_history, visible_task
 from utils.whois import RdapNotFoundError, fetch_rdap, format_whois_output
 
 
@@ -541,7 +541,7 @@ def register_live_url_routes(app, database, db, current_user, login_required, ca
                 flash("Live URL analysis started in the isolated browser profile.", "success")
                 return redirect(url_for("live_url_analysis"))
         requested_target = request.args.get("target", "").strip() if request.method == "GET" else ""
-        return render_template("live_url.html", tasks=visible_tasks(db(), "live_url_tasks", current_user()["id"]), user_agents=USER_AGENTS, requested_target=requested_target)
+        return render_template("live_url.html", history=module_history(db(), "live_url", current_user()["id"], request.args), user_agents=USER_AGENTS, requested_target=requested_target)
 
     @app.get("/analysis/live-url/<task_id>")
     @login_required

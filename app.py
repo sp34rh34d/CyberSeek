@@ -13,8 +13,6 @@ from urllib.parse import urlparse
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from dotenv import load_dotenv
 from werkzeug.security import check_password_hash, generate_password_hash
-from werkzeug.utils import secure_filename
-from utils.analysis import analyze_file, analyze_url, notify_n8n, sha256_file
 from utils.blacklist import register_blacklist_routes
 from utils.dns import register_dns_routes
 from utils.spf import register_spf_routes
@@ -27,7 +25,10 @@ from utils.local_heuristics import backfill_local_intelligence, init_local_heuri
 from utils.eml import register_eml_routes
 from utils.email_exposure import register_email_exposure_routes
 from utils.file_scan import register_file_scan_routes
-from utils.task_access import add_task_visibility_columns
+from utils.modules import ADMIN_ITEMS, ICONS, MODULES, navigation, rerun_args
+from utils.task_access import add_task_visibility_columns, recover_interrupted_tasks
+from utils.uploads import harden_upload_dir, start_upload_retention
+from utils.workspace import init_workspace, register_workspace_routes
 from utils.two_factor import create_secret, decrypt_secret, encrypt_secret, provisioning_uri, qr_data_uri, valid_code
 from utils.whois import register_whois_routes
 
@@ -38,7 +39,6 @@ load_dotenv(BASE_DIR / ".env")
 SERVICE_SETTINGS = service_settings()
 DATABASE = BASE_DIR / "instance" / "cyberseek.db"
 UPLOAD_DIR = BASE_DIR / "uploads"
-ALLOWED_EXTENSIONS = {"pdf", "doc", "docx", "xls", "xlsx", "csv", "txt", "zip", "exe", "dll", "js", "ps1", "py", "apk"}
 LOGIN_FAILURE_LIMIT = 3
 LOGIN_FAILURE_WINDOW = timedelta(minutes=15)
 INITIAL_IP_QUARANTINE = timedelta(minutes=2)
@@ -90,21 +90,6 @@ def init_db():
                 totp_pending_secret TEXT,
                 totp_enabled INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS analyses (
-                id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                kind TEXT NOT NULL,
-                target TEXT NOT NULL,
-                filename TEXT,
-                sha256 TEXT,
-                status TEXT NOT NULL,
-                risk TEXT NOT NULL,
-                summary TEXT NOT NULL,
-                mitre TEXT NOT NULL,
-                n8n_status TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES users(id)
             );
             CREATE TABLE IF NOT EXISTS dns_tasks (
                 id TEXT PRIMARY KEY,
@@ -303,12 +288,18 @@ def init_db():
             connection.execute("ALTER TABLE users ADD COLUMN name TEXT NOT NULL DEFAULT ''")
             connection.execute("UPDATE users SET name = username WHERE name = ''")
         backfill_local_intelligence(connection)
+        init_workspace(connection)
+        recovered = recover_interrupted_tasks(connection)
+        if recovered:
+            app.logger.warning("Marked %d task(s) interrupted by the previous shutdown as failed.", recovered)
         admin = connection.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()
         if not admin:
             connection.execute(
                 "INSERT INTO users (user_uuid, name, username, password_hash, is_admin, must_change_password, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (str(uuid.uuid4()), "Administrator", "admin", generate_password_hash("arasaka", method="pbkdf2:sha256:600000"), 1, 1, datetime.now(timezone.utc).isoformat()),
             )
+    harden_upload_dir(UPLOAD_DIR)
+    start_upload_retention(DATABASE, UPLOAD_DIR, SERVICE_SETTINGS["UPLOAD_RETENTION_DAYS"])
     start_surface_scheduler(DATABASE)
 
 
@@ -321,6 +312,27 @@ def current_user():
 @app.context_processor
 def inject_current_user():
     return {"current_user": current_user, "csrf_token": csrf_token}
+
+
+def csp_nonce():
+    return g.get("csp_nonce", "")
+
+
+def url_with(**changes):
+    """URL of the current page with some query parameters replaced (None removes one)."""
+    args = request.args.to_dict()
+    for key, value in changes.items():
+        if value is None:
+            args.pop(key, None)
+        else:
+            args[key] = value
+    return url_for(request.endpoint, **(request.view_args or {}), **args)
+
+
+app.jinja_env.globals.update(
+    csp_nonce=csp_nonce, url_with=url_with, navigation=navigation, rerun_args=rerun_args,
+    modules=MODULES, module_icons=ICONS, admin_items=ADMIN_ITEMS,
+)
 
 
 @app.before_request
@@ -354,22 +366,17 @@ def protect_against_csrf():
 
 @app.after_request
 def apply_security_headers(response):
-    nonce = getattr(g, "csp_nonce", secrets.token_urlsafe(16))
-    if response.mimetype == "text/html":
-        document = response.get_data(as_text=True)
-        if "<script" in document:
-            response.set_data(document.replace("<script", f'<script nonce="{nonce}"'))
-
+    nonce = g.get("csp_nonce") or secrets.token_urlsafe(16)
     policy = "; ".join((
         "default-src 'self'",
         "base-uri 'self'",
         "object-src 'none'",
         "frame-ancestors 'none'",
         "form-action 'self'",
-        f"script-src 'self' 'nonce-{nonce}' 'unsafe-hashes' 'sha256-UzlcSmbX0yUJT7hkhoYjXfKWsyloSDaNGC7i5v9WcAE=' https://unpkg.com https://cdn.jsdelivr.net",
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
-        "font-src 'self' https://fonts.gstatic.com",
-        "img-src 'self' data: https://unpkg.com https://*.basemaps.cartocdn.com",
+        f"script-src 'self' 'nonce-{nonce}'",
+        "style-src 'self' 'unsafe-inline'",
+        "font-src 'self'",
+        "img-src 'self' data: https://*.basemaps.cartocdn.com",
         "connect-src 'self'",
         "media-src 'self'",
         "worker-src 'self'",
@@ -478,7 +485,7 @@ def admin_required(view):
     def wrapped(*args, **kwargs):
         if not current_user()["is_admin"]:
             flash("This action requires an administrator account.", "error")
-            return redirect(url_for("surface_monitoring"))
+            return redirect(url_for("dashboard"))
         return view(*args, **kwargs)
     wrapped.__name__ = view.__name__
     return wrapped
@@ -486,19 +493,13 @@ def admin_required(view):
 
 @app.route("/")
 def index():
-    return redirect(url_for("surface_monitoring") if current_user() else "login")
-
-
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    flash("Public registration is disabled. Request an account from an administrator.", "warning")
-    return redirect(url_for("login"))
+    return redirect(url_for("dashboard") if current_user() else url_for("login"))
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if current_user():
-        return redirect(url_for("surface_monitoring"))
+        return redirect(url_for("dashboard"))
     if request.method == "POST":
         ip_address = login_client_ip()
         remaining = login_quarantine_remaining(db(), ip_address)
@@ -513,7 +514,7 @@ def login():
                 session["pending_2fa_user_id"] = user["id"]
                 return redirect(url_for("two_factor_login"))
             session["user_id"] = user["id"]
-            return redirect(url_for("change_password") if user["must_change_password"] else url_for("surface_monitoring"))
+            return redirect(url_for("change_password") if user["must_change_password"] else url_for("dashboard"))
         quarantine = record_login_failure(db(), ip_address)
         if quarantine:
             minutes = int(quarantine.total_seconds() // 60)
@@ -543,7 +544,7 @@ def two_factor_login():
         if secret and valid_code(secret, request.form.get("code")):
             clear_login_failures(db(), login_client_ip())
             session.clear(); session.permanent = True; session["user_id"] = user["id"]
-            return redirect(url_for("change_password") if user["must_change_password"] else url_for("surface_monitoring"))
+            return redirect(url_for("change_password") if user["must_change_password"] else url_for("dashboard"))
         quarantine = record_login_failure(db(), login_client_ip())
         if quarantine:
             minutes = int(quarantine.total_seconds() // 60)
@@ -570,7 +571,7 @@ def change_password():
                 (generate_password_hash(password, method="pbkdf2:sha256:600000"), current_user()["id"]))
             db().commit()
             flash("Password updated.", "success")
-            return redirect(url_for("surface_monitoring"))
+            return redirect(url_for("dashboard"))
     return render_template("change_password.html")
 
 
@@ -604,14 +605,6 @@ def two_factor_settings():
     user = current_user()
     pending = decrypt_secret(user["totp_pending_secret"], BASE_DIR) if user["totp_pending_secret"] else None
     return render_template("two_factor_settings.html", pending_qr=qr_data_uri(provisioning_uri(pending, user["username"])) if pending else None)
-
-
-@app.route("/dashboard")
-@login_required
-def dashboard():
-    if current_user()["must_change_password"]:
-        return redirect(url_for("change_password"))
-    return redirect(url_for("surface_monitoring"))
 
 
 @app.route("/admin/users", methods=["GET", "POST"])
@@ -717,40 +710,6 @@ def delete_user(username):
     return redirect(url_for("manage_users"))
 
 
-@app.post("/analyze/url")
-@login_required
-def submit_url():
-    target = request.form.get("url", "").strip()
-    risk, summary, mitre = analyze_url(target)
-    analysis_id = str(uuid.uuid4())
-    n8n_status = notify_n8n({"analysis_id": analysis_id, "type": "url", "target": target, "risk": risk, "mitre": mitre})
-    db().execute("INSERT INTO analyses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (analysis_id, current_user()["id"], "URL", target, None, None, "Complete", risk, summary, ", ".join(mitre) or "No mapping", n8n_status, datetime.now(timezone.utc).isoformat()))
-    db().commit(); flash("URL analysis recorded.", "success")
-    return redirect(url_for("surface_monitoring"))
-
-
-@app.post("/analyze/file")
-@login_required
-def submit_file():
-    upload = request.files.get("file")
-    if not upload or not upload.filename:
-        flash("Select a file.", "error"); return redirect(url_for("surface_monitoring"))
-    filename = secure_filename(upload.filename)
-    if not filename:
-        flash("Invalid file name.", "error"); return redirect(url_for("surface_monitoring"))
-    stored = UPLOAD_DIR / f"{uuid.uuid4()}_{filename}"
-    upload.save(stored)
-    digest = sha256_file(stored)
-    risk, summary, mitre = analyze_file(filename, stored, ALLOWED_EXTENSIONS)
-    analysis_id = str(uuid.uuid4())
-    n8n_status = notify_n8n({"analysis_id": analysis_id, "type": "file", "filename": filename, "sha256": digest, "risk": risk, "mitre": mitre})
-    db().execute("INSERT INTO analyses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (analysis_id, current_user()["id"], "File", filename, filename, digest, "Complete", risk, summary, ", ".join(mitre) or "No mapping", n8n_status, datetime.now(timezone.utc).isoformat()))
-    db().commit(); flash("File saved for static analysis; it was not executed.", "success")
-    return redirect(url_for("surface_monitoring"))
-
-
 register_dns_routes(app, DATABASE, db, current_user, login_required)
 register_whois_routes(app, DATABASE, db, current_user, login_required)
 register_blacklist_routes(app, DATABASE, db, current_user, login_required)
@@ -761,12 +720,16 @@ register_email_exposure_routes(app, DATABASE, db, current_user, login_required)
 register_live_url_routes(app, DATABASE, db, current_user, login_required, BASE_DIR / "instance" / "live_url_captures")
 register_eml_routes(app, DATABASE, db, current_user, login_required, UPLOAD_DIR)
 register_file_scan_routes(app, DATABASE, db, current_user, login_required, UPLOAD_DIR)
+register_workspace_routes(app, db, current_user, login_required)
 
 
 @app.errorhandler(413)
 def too_large(_error):
-    flash("File too large (100 MB default maximum).", "error")
-    return redirect(url_for("surface_monitoring"))
+    limit_mb = app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
+    flash(f"File too large. The maximum upload size is {limit_mb} MB.", "error")
+    referrer = urlparse(request.referrer or "")
+    same_origin = referrer.netloc == request.host and referrer.path.startswith("/")
+    return redirect(referrer.path if same_origin else url_for("dashboard"))
 
 
 def main():
